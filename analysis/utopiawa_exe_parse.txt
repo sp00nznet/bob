@@ -1,0 +1,39 @@
+=== NE Executable: UTOPIAWA/UTOPIAWA.EXE ===
+Linker: 101.1
+Target OS: Windows
+Flags: 0x0302 (GLOBALHEAP)
+Entry: seg 5:0002
+Stack: seg 10, SP=0x0000
+Alignment shift: 4 (sector size: 16)
+
+Segments: 10 total (9 CODE, 1 DATA)
+Code size: 275,124 bytes
+Relocations: 765 total
+
+Imported modules: USER, UWAOLE, UTOPIA, KERNEL, GDI, KEYBOARD, COMMDLG, SHELL, WIN87EM
+
+Resident names (3):
+  0: UTOPIAWA
+  1: ___EXPORTEDSTUB
+  2: _AFX_VERSION
+
+Entry points (2):
+  #1: seg 5:0x2AD1 (___EXPORTEDSTUB)
+  #2: seg 2:0x3DAC (_AFX_VERSION)
+
+=== Code Segments ===
+  Seg   1: 0x00008A80  size=0x948D ( 38029), 39 relocs DISC
+  Seg   2: 0x00012050  size=0x8ECD ( 36557), 154 relocs DISC
+  Seg   3: 0x0001B3F0  size=0x706F ( 28783), 141 relocs DISC
+  Seg   4: 0x000228D0  size=0x79CA ( 31178), 100 relocs DISC
+  Seg   5: 0x00001020  size=0x3EAE ( 16046), 67 relocs DISC
+  Seg   6: 0x0002A5C0  size=0x9445 ( 37957), 95 relocs DISC
+  Seg   7: 0x00033D00  size=0x97ED ( 38893), 65 relocs DISC
+  Seg   8: 0x0003D700  size=0x9D16 ( 40214), 83 relocs DISC
+  Seg   9: 0x000476B0  size=0x1D2B (  7467), 11 relocs DISC
+
+=== Relocation Summary ===
+  Internal references: 67
+  Import references: 698
+  Code segments referenced by relocations: 9
+  Data segments referenced by relocations: 0

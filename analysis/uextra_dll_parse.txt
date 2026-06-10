@@ -1,0 +1,44 @@
+=== NE Executable: UEXTRA.DLL ===
+Linker: 5.60
+Target OS: Windows
+Flags: 0x8301 (DLL)
+Entry: seg 2:003C
+Stack: seg 0, SP=0x0000
+Alignment shift: 4 (sector size: 16)
+
+Segments: 3 total (2 CODE, 1 DATA)
+Code size: 8,285 bytes
+Relocations: 27 total
+
+Imported modules: MSABC110, KERNEL, USER, WIN87EM, MSAJT110
+
+Resident names (12):
+  0: UEXTRA
+  1: HOLE
+  2: RLETRANSEXPAND
+  3: COPYDIBBITS
+  4: ___EXPORTEDSTUB
+  ... and 7 more
+
+Entry points (11):
+  #1: seg 3:0x0134 (HOLE)
+  #2: seg 1:0x00EF (RLETRANSEXPAND)
+  #3: seg 1:0x03BD (COPYDIBBITS)
+  #4: seg 2:0x04BA (___EXPORTEDSTUB)
+  #5: seg 1:0x066C (FIXEDMULTIPLY)
+  #6: seg 1:0x0406 (HMEMSET)
+  #7: seg 1:0x068C (FIXEDDIVIDE)
+  #8: seg 1:0x0450 (DOSTRETCHTRANSPARENTDIBITS)
+  #9: seg 3:0x0010 (B$PEND)
+  #10: seg 1:0x0300 (TRANSCOPYDIBBITS)
+  ... and 1 more
+
+=== Code Segments ===
+  Seg   1: 0x00000260  size=0x06A8 (  1704)
+  Seg   2: 0x00000920  size=0x19B5 (  6581), 23 relocs DISC
+
+=== Relocation Summary ===
+  Internal references: 4
+  Import references: 23
+  Code segments referenced by relocations: 2
+  Data segments referenced by relocations: 0

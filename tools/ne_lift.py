@@ -1,0 +1,640 @@
+"""
+ne_lift.py - NE-aware 16-bit x86 to C Lifter for El-Fish Recomp
+
+Extends pcrecomp's lift16.py with:
+- NE relocation-aware far call resolution
+- x87 FPU instruction lifting to native C double operations
+- TSXLIB import resolution to C runtime stubs
+- Segment-aware memory access
+
+Usage:
+    python ne_lift.py <ne_exe> --seg N [--func OFFSET] [--all]
+"""
+
+import sys
+import os
+from typing import Optional
+
+_PC = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'tools', 'tools'))
+sys.path.insert(0, os.path.join(_PC, 'disasm'))
+sys.path.insert(0, os.path.join(_PC, 'lift'))
+sys.path.insert(0, os.path.dirname(__file__))
+
+from decode16 import Decoder, Instruction, OpType, Operand, REG16_NAMES
+from lift16 import Lifter, _read, _write, _reg16, _sreg, _mem_addr, _label
+from ne_parse import parse_ne, NEHeader, Segment
+from ne_decode import disassemble_segment, build_reloc_map
+from fpu_decode import decode_fpu, format_fpu
+from win16 import get_import, module_name, is_fpu_module
+
+
+class NELifter(Lifter):
+    """Lifts NE executable segments to C code with FPU and relocation support."""
+
+    def __init__(self, ne: NEHeader, seg: Segment):
+        super().__init__()
+        self.ne = ne
+        self.seg = seg
+        self.reloc_map = build_reloc_map(seg, ne)
+        # Build function name map: (seg_num, offset) -> name
+        self.func_names = {}
+        # Segment lookup by (possibly offset) index — robust to segment-number
+        # remapping used for multi-module recomp (CATZ.WAD segs become 60+).
+        self.seg_by_index = {s.index: s for s in ne.segments}
+        # Cross-module call resolution: {MODULE_UPPER: {ordinal: (seg, off)}}.
+        # Set externally for the host module (CATZ.WAD -> CATZDLL exports).
+        self.xmod = {}
+
+    def _resolve_far_call(self, inst: Instruction) -> Optional[str]:
+        """Resolve a far call instruction using relocation data."""
+        local_off = inst.offset - self.seg.file_offset
+        # Check relocations at offset+1 (the operand bytes of CALL far)
+        for off in range(local_off, local_off + inst.length):
+            if off in self.reloc_map:
+                ann = self.reloc_map[off]
+                r = ann.reloc
+                target_type = r.flags & 3
+                if target_type == 0:  # Internal
+                    if r.target_seg > 0 and r.target_seg != 0xFF:
+                        target = self.seg_by_index.get(r.target_seg)
+                        if target is not None and target.is_code:
+                            return f'seg{r.target_seg:03d}_{r.target_off:04X}'
+                        else:
+                            return f'/* data ref seg{r.target_seg}:{r.target_off:04X} */'
+                elif target_type in (1, 2):  # Import by ordinal / by name
+                    mod = module_name(self.ne, r.module_idx)
+                    # Cross-module call into another lifted module (e.g. CATZDLL):
+                    # resolve the ordinal to that module's export entry -> function.
+                    xm = self.xmod.get(mod.upper())
+                    if xm is not None and r.ordinal in xm:
+                        s, o = xm[r.ordinal]
+                        return f'seg{s:03d}_{o:04X}'
+                    imp = get_import(mod, r.ordinal)
+                    return imp.name
+        return None
+
+    def _get_reloc_at(self, local_off: int) -> Optional[object]:
+        """Get relocation annotation at a given local offset."""
+        return self.reloc_map.get(local_off)
+
+    def lift_instruction(self, inst: Instruction, func_start: int):
+        """Override to handle FPU instructions and NE-specific features."""
+        m = inst.mnemonic
+        op1 = inst.op1
+        op2 = inst.op2
+        local_off = inst.offset - self.seg.file_offset
+        orig = repr(inst)
+
+        # Emit label if this address is a jump target
+        self._emit_label(inst.address)
+
+        # --- FWAIT / NOP are no-ops in our model ---
+        # CATZ uses real x87 instructions (not inline FP-emulation trampolines
+        # like El-Fish's TSXLIB), so FWAIT/NOP carry no semantics here. (An NOP
+        # may host a fixup site, but the fixup target is what matters, not the
+        # NOP itself.) Drop them.
+        if m in ('wait', 'nop'):
+            if m == 'wait':
+                return
+            if m == 'nop':
+                return
+
+        # --- FPU instructions ---
+        if m.startswith('f') and not m.startswith('flags'):
+            self._lift_fpu(inst, m, orig)
+            return
+
+        # --- Far calls with relocation resolution ---
+        if m == 'call' and op1 and op1.type == OpType.FAR:
+            func_name = self._resolve_far_call(inst)
+            if func_name and not func_name.startswith('/*'):
+                self._emit(f'push16(cpu, cpu->cs); push16(cpu, 0);', 'far call return addr')
+                self._emit(f'{func_name}(cpu);', orig)
+            elif func_name:
+                self._emit(func_name, orig)
+            else:
+                self._emit(f'/* unresolved far call {orig} */', orig)
+            return
+
+        # --- Indirect far call/jmp through memory (function pointer dispatch) ---
+        if m in ('call far', 'jmp far') and op1 and op1.type == OpType.MEM:
+            seg_e, off_e = _mem_addr(op1)
+            read = (f'uint16_t _o = mem_read16(cpu, {seg_e}, {off_e}); '
+                    f'uint16_t _s = mem_read16(cpu, {seg_e}, (uint16_t)({off_e} + 2));')
+            if m == 'call far':
+                self._emit(f'{{ {read} push16(cpu, cpu->cs); push16(cpu, 0); '
+                           f'dispatch_far(cpu, _s, _o); }}', orig)
+            else:  # jmp far -> tail dispatch
+                self._emit(f'{{ {read} dispatch_far(cpu, _s, _o); return; }}', orig)
+            return
+
+        # --- Indirect near call/jmp through memory (target in this segment) ---
+        if m in ('call', 'jmp') and op1 and op1.type == OpType.MEM:
+            seg_e, off_e = _mem_addr(op1)
+            idx = self.seg.index
+            if m == 'call':
+                self._emit(f'{{ uint16_t _o = mem_read16(cpu, {seg_e}, {off_e}); '
+                           f'push16(cpu, 0); dispatch_near(cpu, {idx}, _o); }}', orig)
+            else:  # jmp near indirect -> tail dispatch
+                self._emit(f'{{ uint16_t _o = mem_read16(cpu, {seg_e}, {off_e}); '
+                           f'dispatch_near(cpu, {idx}, _o); return; }}', orig)
+            return
+
+        # --- Near jmp/Jcc to another function in this segment -> tail call ---
+        # (base lifter would drop these as "out of function" comments)
+        _CC = {'jo': 'cc_o', 'jno': 'cc_no', 'jb': 'cc_b', 'jae': 'cc_ae',
+               'je': 'cc_e', 'jne': 'cc_ne', 'jbe': 'cc_be', 'ja': 'cc_a',
+               'js': 'cc_s', 'jns': 'cc_ns', 'jp': 'cc_p', 'jnp': 'cc_np',
+               'jl': 'cc_l', 'jge': 'cc_ge', 'jle': 'cc_le', 'jg': 'cc_g'}
+        if (m == 'jmp' or m in _CC) and op1 and op1.type in (OpType.REL8, OpType.REL16):
+            target = op1.disp
+            if (target not in self.valid_addrs
+                    and target in getattr(self, 'seg_func_offsets', ())):
+                callee = f'seg{self.seg.index:03d}_{target:04X}'
+                if m == 'jmp':
+                    self._emit(f'{callee}(cpu); return;', orig)
+                else:
+                    self._emit(f'if ({_CC[m]}(cpu)) {{ {callee}(cpu); return; }}', orig)
+                return
+
+        # --- loop/jcxz to another function in this segment -> tail call ---
+        if m in ('loop', 'loopz', 'loopnz', 'jcxz') and op1 and op1.type in (OpType.REL8, OpType.REL16):
+            target = op1.disp
+            if (target not in self.valid_addrs
+                    and target in getattr(self, 'seg_func_offsets', ())):
+                callee = f'seg{self.seg.index:03d}_{target:04X}'
+                cond = {'loop': 'cpu->cx != 0',
+                        'loopz': 'cpu->cx != 0 && zf(cpu)',
+                        'loopnz': 'cpu->cx != 0 && !zf(cpu)',
+                        'jcxz': 'cpu->cx == 0'}[m]
+                dec = 'cpu->cx--; ' if m != 'jcxz' else ''
+                self._emit(f'{dec}if ({cond}) {{ {callee}(cpu); return; }}', orig)
+                return
+
+        # --- Far jumps (resolve via relocation -> tail call) ---
+        if m == 'jmp' and op1 and op1.type == OpType.FAR:
+            func_name = self._resolve_far_call(inst)
+            if func_name and not func_name.startswith('/*'):
+                # Tail call: run the target, then return to our caller.
+                self._emit(f'{func_name}(cpu); return;', orig)
+            else:
+                self._emit(f'/* unresolved far jmp {orig} */', orig)
+            return
+
+        # --- Near calls ---
+        if m == 'call' and op1 and op1.type in (OpType.REL8, OpType.REL16):
+            target = op1.disp
+            func_name = f'seg{self.seg.index:03d}_{target:04X}'
+            self.func_calls.add(func_name)
+            self._emit(f'push16(cpu, 0);', 'near call return addr')
+            self._emit(f'{func_name}(cpu);', orig)
+            return
+
+        # --- Relocated immediates: `mov reg/mem, SELECTOR|OFFSET of symbol` ---
+        # The immediate in the original bytes is a placeholder (0xFFFF); the real
+        # value comes from the relocation. gen_image patches these in DATA, but
+        # the lifted CODE uses the immediate directly, so resolve it here.
+        # Covers taking the address of a function/data (incl. cross-module, e.g.
+        # a CATZDLL export's offset/selector stored as a WAD callback pointer).
+        if m == 'mov' and op2 and op2.type in (OpType.IMM8, OpType.IMM16):
+            for off in range(local_off + 1, local_off + inst.length):
+                ann = self._get_reloc_at(off)
+                if not ann:
+                    continue
+                r = ann.reloc
+                tt = r.flags & 3
+                if r.src_type == 2:        # SELECTOR (segment of a symbol)
+                    if tt == 0:
+                        self._emit(_write(op1, f'SEG_{r.target_seg}'),
+                                   f'{orig} -- selector for seg{r.target_seg}')
+                        return
+                    elif tt in (1, 2):     # cross-module selector (e.g. CATZDLL)
+                        mod = module_name(self.ne, r.module_idx)
+                        xm = self.xmod.get(mod.upper())
+                        if xm and r.ordinal in xm:
+                            self._emit(_write(op1, f'SEG_{xm[r.ordinal][0]}'),
+                                       f'{orig} -- selector for {mod}.{r.ordinal}')
+                            return
+                elif r.src_type == 5:      # OFFSET16 (offset of a symbol)
+                    if tt == 0:
+                        self._emit(_write(op1, f'0x{r.target_off & 0xFFFF:04X}'),
+                                   f'{orig} -- offset of seg{r.target_seg}:{r.target_off:04X}')
+                        return
+                    elif tt in (1, 2):
+                        mod = module_name(self.ne, r.module_idx)
+                        xm = self.xmod.get(mod.upper())
+                        if xm and r.ordinal in xm:
+                            self._emit(_write(op1, f'0x{xm[r.ordinal][1] & 0xFFFF:04X}'),
+                                       f'{orig} -- offset of {mod}.{r.ordinal}')
+                            return
+
+        # --- Default: delegate to base lifter ---
+        super().lift_instruction(inst, func_start)
+
+    def _lift_fpu(self, inst: Instruction, m: str, orig: str):
+        """Lift an FPU instruction to C double operations."""
+        # The FPU mnemonic may include operands (from fpu_decode.py format_fpu)
+        # Parse the mnemonic to extract operation and operands
+        parts = m.split(' ', 1)
+        op = parts[0]
+        operand_str = parts[1] if len(parts) > 1 else ''
+
+        # --- FPU Stack Operations ---
+        if op == 'fld':
+            if 'st(' in operand_str:
+                # fld st(i) - push copy of st(i) onto stack
+                i = self._parse_st(operand_str)
+                self._emit(f'fpu_push(cpu); cpu->st[0] = cpu->st[{i+1}];', orig)
+            elif 'dword' in operand_str or 'qword' in operand_str or 'tword' in operand_str:
+                mem_expr = self._fpu_mem_read(inst, operand_str)
+                self._emit(f'fpu_push(cpu); cpu->st[0] = {mem_expr};', orig)
+            else:
+                self._emit(f'/* FPU: {orig} */', orig)
+
+        elif op == 'fst':
+            if 'st(' in operand_str:
+                i = self._parse_st(operand_str)
+                self._emit(f'cpu->st[{i}] = cpu->st[0];', orig)
+            elif operand_str:
+                mem_expr = self._fpu_mem_write(inst, operand_str, 'cpu->st[0]')
+                self._emit(mem_expr, orig)
+            else:
+                self._emit(f'/* FPU: {orig} */', orig)
+
+        elif op == 'fstp':
+            if 'st(' in operand_str:
+                i = self._parse_st(operand_str)
+                self._emit(f'cpu->st[{i}] = cpu->st[0]; fpu_pop(cpu);', orig)
+            elif operand_str:
+                mem_expr = self._fpu_mem_write(inst, operand_str, 'cpu->st[0]')
+                self._emit(f'{mem_expr} fpu_pop(cpu);', orig)
+            else:
+                self._emit(f'/* FPU: {orig} */', orig)
+
+        elif op == 'fild':
+            mem_expr = self._fpu_mem_read_int(inst, operand_str)
+            self._emit(f'fpu_push(cpu); cpu->st[0] = (double){mem_expr};', orig)
+
+        elif op == 'fist':
+            mem_expr = self._fpu_mem_write_int(inst, operand_str, '(int32_t)cpu->st[0]')
+            self._emit(mem_expr, orig)
+
+        elif op == 'fistp':
+            mem_expr = self._fpu_mem_write_int(inst, operand_str, '(int32_t)cpu->st[0]')
+            self._emit(f'{mem_expr} fpu_pop(cpu);', orig)
+
+        # --- FPU Arithmetic ---
+        elif op == 'fadd':
+            self._lift_fpu_arith(inst, '+', operand_str, orig)
+        elif op == 'faddp':
+            self._lift_fpu_arith_pop('+', operand_str, orig)
+        elif op == 'fsub':
+            self._lift_fpu_arith(inst, '-', operand_str, orig)
+        elif op == 'fsubp':
+            self._lift_fpu_arith_pop('-', operand_str, orig)
+        elif op == 'fsubr':
+            self._lift_fpu_arith_r(inst, '-', operand_str, orig)
+        elif op == 'fsubrp':
+            self._lift_fpu_arith_r_pop('-', operand_str, orig)
+        elif op == 'fmul':
+            self._lift_fpu_arith(inst, '*', operand_str, orig)
+        elif op == 'fmulp':
+            self._lift_fpu_arith_pop('*', operand_str, orig)
+        elif op == 'fdiv':
+            self._lift_fpu_arith(inst, '/', operand_str, orig)
+        elif op == 'fdivp':
+            self._lift_fpu_arith_pop('/', operand_str, orig)
+        elif op == 'fdivr':
+            self._lift_fpu_arith_r(inst, '/', operand_str, orig)
+        elif op == 'fdivrp':
+            self._lift_fpu_arith_r_pop('/', operand_str, orig)
+
+        # --- FPU Integer Arithmetic ---
+        elif op == 'fiadd':
+            mem = self._fpu_mem_read_int(inst, operand_str)
+            self._emit(f'cpu->st[0] += (double){mem};', orig)
+        elif op == 'fisub':
+            mem = self._fpu_mem_read_int(inst, operand_str)
+            self._emit(f'cpu->st[0] -= (double){mem};', orig)
+        elif op == 'fisubr':
+            mem = self._fpu_mem_read_int(inst, operand_str)
+            self._emit(f'cpu->st[0] = (double){mem} - cpu->st[0];', orig)
+        elif op == 'fimul':
+            mem = self._fpu_mem_read_int(inst, operand_str)
+            self._emit(f'cpu->st[0] *= (double){mem};', orig)
+        elif op == 'fidiv':
+            mem = self._fpu_mem_read_int(inst, operand_str)
+            self._emit(f'cpu->st[0] /= (double){mem};', orig)
+        elif op == 'fidivr':
+            mem = self._fpu_mem_read_int(inst, operand_str)
+            self._emit(f'cpu->st[0] = (double){mem} / cpu->st[0];', orig)
+
+        # --- FPU Compare ---
+        elif op == 'fcom':
+            if 'st(0), st(' in operand_str:
+                i = self._parse_st(operand_str.split('st(0), ')[1])
+                self._emit(f'fpu_compare(cpu, cpu->st[0], cpu->st[{i}]);', orig)
+            elif 'st(' in operand_str:
+                i = self._parse_st(operand_str)
+                self._emit(f'fpu_compare(cpu, cpu->st[0], cpu->st[{i}]);', orig)
+            elif operand_str:
+                mem = self._fpu_mem_read(inst, operand_str)
+                self._emit(f'fpu_compare(cpu, cpu->st[0], {mem});', orig)
+            else:
+                self._emit(f'fpu_compare(cpu, cpu->st[0], cpu->st[1]);', orig)
+        elif op == 'fcomp':
+            if 'st(0), st(' in operand_str:
+                i = self._parse_st(operand_str.split('st(0), ')[1])
+                self._emit(f'fpu_compare(cpu, cpu->st[0], cpu->st[{i}]); fpu_pop(cpu);', orig)
+            elif 'dword' in operand_str or 'qword' in operand_str:
+                mem = self._fpu_mem_read(inst, operand_str)
+                self._emit(f'fpu_compare(cpu, cpu->st[0], {mem}); fpu_pop(cpu);', orig)
+            else:
+                self._emit(f'fpu_compare(cpu, cpu->st[0], cpu->st[1]); fpu_pop(cpu);', orig)
+        elif op == 'fcompp':
+            self._emit(f'fpu_compare(cpu, cpu->st[0], cpu->st[1]); fpu_pop(cpu); fpu_pop(cpu);', orig)
+        elif op == 'ftst':
+            self._emit(f'fpu_compare(cpu, cpu->st[0], 0.0);', orig)
+        elif op == 'fucom':
+            if 'st(' in operand_str:
+                i = self._parse_st(operand_str)
+                self._emit(f'fpu_compare(cpu, cpu->st[0], cpu->st[{i}]);', orig)
+            else:
+                self._emit(f'fpu_compare(cpu, cpu->st[0], cpu->st[1]);', orig)
+        elif op == 'fucomp':
+            if 'st(' in operand_str:
+                i = self._parse_st(operand_str)
+                self._emit(f'fpu_compare(cpu, cpu->st[0], cpu->st[{i}]); fpu_pop(cpu);', orig)
+            else:
+                self._emit(f'fpu_compare(cpu, cpu->st[0], cpu->st[1]); fpu_pop(cpu);', orig)
+        elif op == 'fucompp':
+            self._emit(f'fpu_compare(cpu, cpu->st[0], cpu->st[1]); fpu_pop(cpu); fpu_pop(cpu);', orig)
+
+        # --- FPU Constants ---
+        elif op == 'fld1':
+            self._emit(f'fpu_push(cpu); cpu->st[0] = 1.0;', orig)
+        elif op == 'fldz':
+            self._emit(f'fpu_push(cpu); cpu->st[0] = 0.0;', orig)
+        elif op == 'fldpi':
+            self._emit(f'fpu_push(cpu); cpu->st[0] = 3.14159265358979323846;', orig)
+        elif op == 'fldl2e':
+            self._emit(f'fpu_push(cpu); cpu->st[0] = 1.44269504088896340736;', orig)
+        elif op == 'fldl2t':
+            self._emit(f'fpu_push(cpu); cpu->st[0] = 3.32192809488736234787;', orig)
+        elif op == 'fldlg2':
+            self._emit(f'fpu_push(cpu); cpu->st[0] = 0.30102999566398119521;', orig)
+        elif op == 'fldln2':
+            self._emit(f'fpu_push(cpu); cpu->st[0] = 0.69314718055994530942;', orig)
+
+        # --- FPU Transcendentals ---
+        elif op == 'fsqrt':
+            self._emit(f'cpu->st[0] = sqrt(cpu->st[0]);', orig)
+        elif op == 'fabs':
+            self._emit(f'cpu->st[0] = fabs(cpu->st[0]);', orig)
+        elif op == 'fchs':
+            self._emit(f'cpu->st[0] = -cpu->st[0];', orig)
+        elif op == 'fsin':
+            self._emit(f'cpu->st[0] = sin(cpu->st[0]);', orig)
+        elif op == 'fcos':
+            self._emit(f'cpu->st[0] = cos(cpu->st[0]);', orig)
+        elif op == 'fpatan':
+            self._emit(f'{{ double _y = cpu->st[1], _x = cpu->st[0]; '
+                       f'fpu_pop(cpu); cpu->st[0] = atan2(_y, _x); }}', orig)
+        elif op == 'fptan':
+            self._emit(f'cpu->st[0] = tan(cpu->st[0]); fpu_push(cpu); cpu->st[0] = 1.0;', orig)
+        elif op == 'frndint':
+            self._emit(f'cpu->st[0] = rint(cpu->st[0]);', orig)
+        elif op == 'fscale':
+            self._emit(f'cpu->st[0] = ldexp(cpu->st[0], (int)cpu->st[1]);', orig)
+        elif op == 'f2xm1':
+            self._emit(f'cpu->st[0] = pow(2.0, cpu->st[0]) - 1.0;', orig)
+        elif op == 'fyl2x':
+            self._emit(f'{{ double _r = cpu->st[1] * log2(cpu->st[0]); '
+                       f'fpu_pop(cpu); cpu->st[0] = _r; }}', orig)
+        elif op == 'fyl2xp1':
+            self._emit(f'{{ double _r = cpu->st[1] * log2(cpu->st[0] + 1.0); '
+                       f'fpu_pop(cpu); cpu->st[0] = _r; }}', orig)
+
+        # --- FPU Control ---
+        elif op == 'fxch':
+            if 'st(' in operand_str:
+                i = self._parse_st(operand_str)
+                self._emit(f'{{ double _t = cpu->st[0]; cpu->st[0] = cpu->st[{i}]; '
+                           f'cpu->st[{i}] = _t; }}', orig)
+            else:
+                self._emit(f'{{ double _t = cpu->st[0]; cpu->st[0] = cpu->st[1]; '
+                           f'cpu->st[1] = _t; }}', orig)
+        elif op == 'ffree':
+            self._emit(f'/* ffree {operand_str} */', orig)
+        elif op == 'finit' or op == 'fninit':
+            self._emit(f'fpu_init(cpu);', orig)
+        elif op == 'fclex' or op == 'fnclex':
+            self._emit(f'cpu->fpu_status &= 0x7F00;', orig)
+        elif op == 'fldcw':
+            self._emit(f'/* fldcw - load FPU control word */', orig)
+        elif op == 'fstcw' or op == 'fnstcw':
+            self._emit(f'/* fstcw - store FPU control word */', orig)
+        elif op == 'fstsw':
+            if 'ax' in operand_str:
+                self._emit(f'cpu->ax = cpu->fpu_status;', orig)
+            else:
+                self._emit(f'/* fstsw {operand_str} */', orig)
+        elif op == 'fdecstp':
+            self._emit(f'cpu->fpu_top = (cpu->fpu_top - 1) & 7;', orig)
+        elif op == 'fincstp':
+            self._emit(f'cpu->fpu_top = (cpu->fpu_top + 1) & 7;', orig)
+        elif op == 'fnop':
+            self._emit(f'/* fnop */', orig)
+
+        # --- Catch-all ---
+        else:
+            self._emit(f'/* FPU TODO: {orig} */', orig)
+
+    def _lift_fpu_arith(self, inst, op: str, operand_str: str, orig: str):
+        """Lift FPU arithmetic: fadd/fsub/fmul/fdiv."""
+        if 'st(0), st(' in operand_str:
+            i = self._parse_st(operand_str.split('st(0), ')[1])
+            self._emit(f'cpu->st[0] = cpu->st[0] {op} cpu->st[{i}];', orig)
+        elif 'st(' in operand_str and '), st(0)' in operand_str:
+            i = self._parse_st(operand_str)
+            self._emit(f'cpu->st[{i}] = cpu->st[{i}] {op} cpu->st[0];', orig)
+        elif operand_str:
+            mem = self._fpu_mem_read(inst, operand_str)
+            self._emit(f'cpu->st[0] = cpu->st[0] {op} {mem};', orig)
+        else:
+            self._emit(f'cpu->st[0] = cpu->st[0] {op} cpu->st[1];', orig)
+
+    def _lift_fpu_arith_pop(self, op: str, operand_str: str, orig: str):
+        """Lift FPU arithmetic with pop: faddp/fsubp/fmulp/fdivp."""
+        if 'st(' in operand_str:
+            i = self._parse_st(operand_str)
+            self._emit(f'cpu->st[{i}] = cpu->st[{i}] {op} cpu->st[0]; fpu_pop(cpu);', orig)
+        else:
+            self._emit(f'cpu->st[1] = cpu->st[1] {op} cpu->st[0]; fpu_pop(cpu);', orig)
+
+    def _lift_fpu_arith_r(self, inst, op: str, operand_str: str, orig: str):
+        """Lift FPU reverse arithmetic: fsubr/fdivr."""
+        if 'st(0), st(' in operand_str:
+            i = self._parse_st(operand_str.split('st(0), ')[1])
+            self._emit(f'cpu->st[0] = cpu->st[{i}] {op} cpu->st[0];', orig)
+        elif operand_str:
+            mem = self._fpu_mem_read(inst, operand_str)
+            self._emit(f'cpu->st[0] = {mem} {op} cpu->st[0];', orig)
+        else:
+            self._emit(f'cpu->st[0] = cpu->st[1] {op} cpu->st[0];', orig)
+
+    def _lift_fpu_arith_r_pop(self, op: str, operand_str: str, orig: str):
+        """Lift FPU reverse arithmetic with pop."""
+        if 'st(' in operand_str:
+            i = self._parse_st(operand_str)
+            self._emit(f'cpu->st[{i}] = cpu->st[0] {op} cpu->st[{i}]; fpu_pop(cpu);', orig)
+        else:
+            self._emit(f'cpu->st[1] = cpu->st[0] {op} cpu->st[1]; fpu_pop(cpu);', orig)
+
+    def _parse_st(self, operand_str: str) -> int:
+        """Extract register number from st(N) pattern, ignoring extra operands."""
+        import re
+        m = re.search(r'st\((\d+)\)', operand_str)
+        return int(m.group(1)) if m else 0
+
+    def _fpu_mem_expr(self, inst, operand_str: str) -> tuple:
+        """Get (seg_expr, off_expr) for FPU memory operand.
+        Uses inst.op1 if available (preserved from ModR/M decode), otherwise falls back."""
+        if inst and inst.op1 and inst.op1.type in (OpType.MEM, OpType.MOFFS):
+            seg, off = _mem_addr(inst.op1)
+            return seg, off
+        # Fallback: can't resolve, emit a comment
+        return 'cpu->ds', f'0 /* TODO: {operand_str} */'
+
+    def _fpu_mem_read(self, inst, operand_str: str) -> str:
+        """Generate C expression to read FPU memory operand as double."""
+        seg, off = self._fpu_mem_expr(inst, operand_str)
+        if 'qword' in operand_str:
+            return f'fpu_read_f64(cpu, {seg}, {off})'
+        elif 'tword' in operand_str:
+            return f'fpu_read_f64(cpu, {seg}, {off}) /* tword approx */'
+        else:  # dword
+            return f'fpu_read_f32(cpu, {seg}, {off})'
+
+    def _fpu_mem_write(self, inst, operand_str: str, value: str) -> str:
+        """Generate C statement to write FPU value to memory."""
+        seg, off = self._fpu_mem_expr(inst, operand_str)
+        if 'qword' in operand_str:
+            return f'fpu_write_f64(cpu, {seg}, {off}, {value});'
+        elif 'tword' in operand_str:
+            return f'fpu_write_f64(cpu, {seg}, {off}, {value}); /* tword approx */'
+        else:  # dword
+            return f'fpu_write_f32(cpu, {seg}, {off}, {value});'
+
+    def _fpu_mem_read_int(self, inst, operand_str: str) -> str:
+        """Generate C expression to read FPU integer memory operand."""
+        seg, off = self._fpu_mem_expr(inst, operand_str)
+        if 'dword' in operand_str:
+            return f'fpu_read_i32(cpu, {seg}, {off})'
+        else:  # word
+            return f'fpu_read_i16(cpu, {seg}, {off})'
+
+    def _fpu_mem_write_int(self, inst, operand_str: str, value: str) -> str:
+        """Generate C statement to write integer to FPU memory."""
+        seg, off = self._fpu_mem_expr(inst, operand_str)
+        if 'dword' in operand_str:
+            return f'fpu_write_i32(cpu, {seg}, {off}, {value});'
+        else:  # word
+            return f'fpu_write_i16(cpu, {seg}, {off}, {value});'
+
+
+def lift_segment(ne: NEHeader, seg_num: int, func_offset: int = -1, xmod=None):
+    """Lift functions from a segment to C code. `xmod` (optional) maps a module
+    name to {ordinal: (seg, off)} for cross-module call resolution (host->DLL)."""
+    seg = next((s for s in ne.segments if s.index == seg_num), None)
+    if not seg or not seg.is_code:
+        print(f"Error: segment {seg_num} not found or not CODE")
+        return
+
+    instructions, functions, reloc_map = disassemble_segment(seg, ne)
+
+    if not functions:
+        print(f"/* No functions detected in segment {seg_num} */")
+        return
+
+    # Header
+    print(f'/* Segment {seg_num} - {seg.actual_size} bytes, {len(functions)} functions */')
+    print(f'/* Auto-generated by ne_lift.py - CATZ Recomp */')
+    print()
+    print('#include "segments.h"')
+    print()
+
+    # CS-relative memory operands must read from THIS segment, not runtime cpu->cs.
+    import lift16
+    lift16._CODE_SEG = seg.index
+
+    # Lift each function
+    lifter = NELifter(ne, seg)
+    lifter.xmod = xmod or {}
+    # Function entry offsets in this segment, for near-jmp-to-another-function.
+    lifter.seg_func_offsets = {f.offset for f in functions}
+
+    target_funcs = functions
+    if func_offset >= 0:
+        target_funcs = [f for f in functions if f.offset == func_offset]
+        if not target_funcs:
+            print(f"/* Function at offset 0x{func_offset:04X} not found */")
+            return
+
+    # Map each function start offset to its label, for fall-through handling.
+    off_to_label = {f.offset: f.label for f in functions}
+    TERMINATORS = ('ret', 'retf', 'iret', 'jmp')
+
+    for func in target_funcs:
+        # Get instructions for this function
+        func_insts = [i for i in instructions
+                      if func.offset <= (i.offset - seg.file_offset) < func.end]
+        if not func_insts:
+            continue
+
+        code = lifter.lift_function(
+            func.label, func_insts, seg.file_offset + func.offset, func.is_far)
+        # Inject an entry-trace marker (compiles to nothing without -DELFISH_TRACE_FN)
+        code = code.replace('{\n', '{\n    TRACE_FN("%s");\n' % func.label, 1)
+
+        # Fall-through: if the last instruction is not a control-flow terminator,
+        # execution flows into the next function. Emit that as a tail call so the
+        # control flow isn't lost at the function boundary.
+        last = func_insts[-1]
+        if last.mnemonic not in TERMINATORS:
+            nxt = off_to_label.get(func.end)
+            if nxt and nxt != func.label:
+                close = code.rfind('}')
+                code = (code[:close]
+                        + f'    {nxt}(cpu); return; /* fall-through */\n'
+                        + code[close:])
+
+        print(code)
+        print()
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} <ne_exe> --seg N [--func OFFSET]")
+        sys.exit(1)
+
+    filepath = sys.argv[1]
+    ne = parse_ne(filepath)
+
+    if '--seg' not in sys.argv:
+        print("Error: --seg N required")
+        sys.exit(1)
+
+    idx = sys.argv.index('--seg')
+    seg_num = int(sys.argv[idx + 1])
+
+    func_offset = -1
+    if '--func' in sys.argv:
+        idx = sys.argv.index('--func')
+        func_offset = int(sys.argv[idx + 1], 0)
+
+    lift_segment(ne, seg_num, func_offset)
+
+
+if __name__ == '__main__':
+    main()

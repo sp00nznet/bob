@@ -1,0 +1,48 @@
+=== BLYTHE.ACT (356,425 bytes) ===
+  name='Blythe' ver=1 hdr[08..0e]=0x0007,0x0019,0x0000,0x00057049
+  printable strings: 6419
+
+=== CHAOS.ACT (291,970 bytes) ===
+  name='Chaos' ver=1 hdr[08..0e]=0x0006,0x0018,0x0000,0x00047482
+  printable strings: 2209
+
+=== HOPPER.ACT (243,047 bytes) ===
+  name='Hopper' ver=1 hdr[08..0e]=0x0007,0x0019,0x0000,0x0003b567
+  printable strings: 862
+
+=== JAVA.ACT (370,865 bytes) ===
+  name='Java' ver=1 hdr[08..0e]=0x0005,0x0017,0x0000,0x0005a8b1
+  printable strings: 4981
+
+=== ORBY.ACT (314,350 bytes) ===
+  name='Orby' ver=1 hdr[08..0e]=0x0005,0x0017,0x0000,0x0004cbee
+  printable strings: 3439
+
+=== ROVER.ACT (429,869 bytes) ===
+  name='Rover' ver=1 hdr[08..0e]=0x0006,0x0018,0x0000,0x00068f2d
+  printable strings: 4070
+
+=== RUBY.ACT (417,198 bytes) ===
+  name='Ruby' ver=1 hdr[08..0e]=0x0005,0x0017,0x0000,0x00065dae
+  printable strings: 4821
+
+=== SCUZZ.ACT (413,786 bytes) ===
+  name='Scuzz' ver=1 hdr[08..0e]=0x0006,0x0018,0x0000,0x0006505a
+  printable strings: 4024
+
+=== SHELLY.ACT (489,230 bytes) ===
+  name='Shelly' ver=1 hdr[08..0e]=0x0007,0x0019,0x0000,0x0007770e
+  printable strings: 3434
+
+=== WORM.ACT (359,018 bytes) ===
+  name='Digger' ver=1 hdr[08..0e]=0x0007,0x0019,0x0000,0x00057a6a
+  printable strings: 4405
+
+=== ZSPEAKER.ACT (5,723 bytes) ===
+  name='Speaker' ver=1 hdr[08..0e]=0x0008,0x001a,0x0000,0x0000165b
+  printable strings: 2
+
+=== ZVISIBLE.ACT (1,847 bytes) ===
+  name='Invisible' ver=1 hdr[08..0e]=0x000a,0x001c,0x0000,0x00000737
+  printable strings: 2
+

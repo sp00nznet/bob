@@ -1,0 +1,50 @@
+# Generated recompiled code
+src/game/recomp/gen/
+
+# Build artifacts
+build/
+out/
+cmake-build-*/
+*.obj
+*.o
+*.lib
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.exp
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+CMakeSettings.json
+CMakeUserPresets.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Original Bob binaries & media (copyrighted — user-supplied, never redistribute)
+game/
+game_data/
+*.xbe
+*.iso
+*.cab
+*.CAB
+
+# Generated flat memory image / build inputs
+build_data/*.bin
+
+# Analysis output (large, regeneratable)
+tools/output/
+*.json.bak
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store

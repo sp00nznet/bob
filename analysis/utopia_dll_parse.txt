@@ -1,0 +1,64 @@
+=== NE Executable: UTOPIA.DLL ===
+Linker: 101.1
+Target OS: Windows
+Flags: 0x8301 (DLL)
+Entry: seg 5:120D
+Stack: seg 0, SP=0x0000
+Alignment shift: 5 (sector size: 32)
+
+Segments: 24 total (22 CODE, 2 DATA)
+Code size: 814,978 bytes
+Relocations: 2,261 total
+
+Imported modules: USER, GDI, KERNEL, UEXTRA, WAVMIX16, OLE2DISP, WING, COMPOBJ, OLE2, COMMDLG, MSAJT110, KEYBOARD, SHELL, MSABC110, MMSYSTEM, WIN87EM
+
+Resident names (71):
+  0: UTOPIA
+  1: WEP
+  54: UERRFROMRESULT
+  52: GETUTOPIADIRECTORY
+  63: UTOPIASOUNDACTIVATE
+  ... and 66 more
+
+Entry points (374):
+  #1: seg 9:0x388E (WEP)
+  #2: seg 6:0x3A44 (?MOUSEHOOKPROC@@ZCJHIJ@Z)
+  #3: seg 12:0x4FCF (?GETFIELDIDS@CRECORDSET@@RECJPEKH@Z)
+  #4: seg 18:0x6952 (?CRTIMERPROC@@ZCXPBUHWND__@@IIK@Z)
+  #5: seg 20:0x5150 (CREATEIMAGEFROMDIBBITS)
+  #6: seg 6:0x3A71 (?KEYBOARDHOOKPROC@@ZCJHIJ@Z)
+  #7: seg 5:0x71D8 (___EXPORTEDSTUB)
+  #8: seg 5:0x1F98 (_AFX_VERSION)
+  #9: seg 21:0x30FD (?DELETETABLE@CDATABASE@@RECJPFD@Z)
+  #10: seg 13:0x0496 (??1USCANNERPREFS@@VEC@XZ)
+  ... and 364 more
+
+=== Code Segments ===
+  Seg   1: 0x00002800  size=0x862B ( 34347), 20 relocs
+  Seg   2: 0x0002B260  size=0xA2A4 ( 41636), 128 relocs DISC
+  Seg   3: 0x00035920  size=0xA1BA ( 41402), 123 relocs DISC
+  Seg   4: 0x0000AEE0  size=0xA1EB ( 41451), 103 relocs DISC
+  Seg   5: 0x00015420  size=0x8D8A ( 36234), 215 relocs DISC
+  Seg   6: 0x0003FEC0  size=0x6BD2 ( 27602), 140 relocs DISC
+  Seg   7: 0x00046F00  size=0x7947 ( 31047), 116 relocs DISC
+  Seg   8: 0x0004EC00  size=0x851D ( 34077), 126 relocs DISC
+  Seg   9: 0x00057520  size=0x6DA3 ( 28067), 101 relocs DISC
+  Seg  10: 0x0005E600  size=0xA350 ( 41808), 122 relocs DISC
+  Seg  11: 0x00068D40  size=0xA1B3 ( 41395), 102 relocs DISC
+  Seg  12: 0x00073240  size=0xA2BA ( 41658), 97 relocs DISC
+  Seg  13: 0x0007D820  size=0xA13A ( 41274), 116 relocs DISC
+  Seg  14: 0x00087D00  size=0xA16C ( 41324), 70 relocs DISC
+  Seg  15: 0x000920A0  size=0x9F22 ( 40738), 64 relocs DISC
+  Seg  16: 0x0009C1E0  size=0x9CCB ( 40139), 73 relocs DISC
+  Seg  17: 0x000A6100  size=0x99A6 ( 39334), 109 relocs DISC
+  Seg  18: 0x000AFE20  size=0x9C45 ( 40005), 115 relocs DISC
+  Seg  19: 0x000B9E00  size=0x9E31 ( 40497), 85 relocs DISC
+  Seg  20: 0x000C3EE0  size=0x9B7C ( 39804), 110 relocs DISC
+  Seg  21: 0x000CDDE0  size=0x9E76 ( 40566), 60 relocs DISC
+  Seg  22: 0x000D7E40  size=0x294D ( 10573), 43 relocs DISC
+
+=== Relocation Summary ===
+  Internal references: 436
+  Import references: 1825
+  Code segments referenced by relocations: 22
+  Data segments referenced by relocations: 2
