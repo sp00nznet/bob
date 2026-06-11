@@ -88,6 +88,7 @@ def main():
     h.append('/* ---- Indirect call dispatchers (function pointers) ---- */')
     h.append('void dispatch_far(CPU *cpu, uint16_t seg, uint16_t off);')
     h.append('void dispatch_near(CPU *cpu, uint16_t seg, uint16_t off);')
+    h.append('void recomp_dispatch(CPU *cpu, uint16_t seg, uint16_t off);')
     h.append('')
     h.append('/* ---- Software interrupts (rare in Win16 code; stubbed) ---- */')
     h.append('void int_handler(CPU *cpu, int int_num);')
