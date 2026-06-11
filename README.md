@@ -77,11 +77,24 @@ your own OEM/retail disc, then extract:
 7z x game/iso/U1.CAB -ogame/install   # UTOPIA.DLL, UTOPIAWA.EXE, ACTORS\*.ACT, ...
 ```
 
-## Status: UEXTRA.DLL lifts to link-clean C — pipeline proven ✅
+## Status: All three modules lift to link-clean C ✅
 
-Recon is complete and the NE→C pipeline is proven end-to-end on the first
-module. **UEXTRA.DLL** (the actor blitter) lifts, compiles, and archives with
-**0 errors / 0 warnings**.
+Recon is complete and **all of Bob's code — the engine, the host, and the
+blitter — lifts to C, compiles, and links clean.** The three modules share one
+global segment space and one static archive; the only unresolved symbols are
+standard libc.
+
+| Module | Global segs | Result |
+|--------|-------------|--------|
+| **UTOPIA.DLL** (engine)   | 1–22  | 22 segs lifted (2,685 IDA funcs / 280,921 heads) |
+| **UEXTRA.DLL** (blitter)  | 25–26 | 2 segs lifted |
+| **UTOPIAWA.EXE** (host)   | 31–39 | 9 segs lifted (1,541 IDA funcs / 101,829 heads) |
+
+Combined: **34,942 functions across 33 code segments**, dispatcher over all of
+them, **16 unresolved stubs out of 32,618 distinct call targets**. Builds with
+mingw gcc to a 39-object / 27 MB static archive — **0 errors, 0 warnings**, and
+**0 non-libc undefined symbols**. Host→engine calls (`UTOPIAWA`→`UTOPIA`, by
+ordinal) are resolved to **direct C calls** via the engine's export table.
 
 Done so far:
 
@@ -95,42 +108,55 @@ Done so far:
 - **Actor (.ACT) format** decoded enough to enumerate: "LP" header, name table,
   and bodies that embed **RIFF/WAVE** voice clips + animation cels. 12 guides
   surveyed (`analysis/actors_summary.txt`), incl. Rover/Java/Scuzz/Ruby/Blythe.
-- **IDA code map** exported for UEXTRA via idalib (36 functions, 1,997 code
-  heads; Win16 ordinal→name across 5 modules).
-- **UEXTRA.DLL lifted end-to-end**: both code segments → C, glue generated
-  (256 prototypes, dispatcher over 254 functions, only **2 unresolved stubs** of
-  256 targets), flat memory image built (136 relocations applied, 0 skipped).
-  Builds with mingw gcc to a static lib, **0 errors / 0 warnings**; every
-  undefined symbol is an expected Win16-shim or runtime extern.
+- **IDA code maps** exported via idalib for all three modules (engine: 2,685
+  funcs / 280,921 heads; host: 1,541 / 101,829; blitter: 36 / 1,997). Win16
+  ordinal→name accumulated across 16 modules / 462 ordinals.
+- **All three modules lifted into one global segment space** (UTOPIA 1–22,
+  UEXTRA 25–26, UTOPIAWA 31–39) via `lift_combined.py`: per-module segment +
+  internal-relocation offsetting, IDA maps re-keyed to the offset numbers, and
+  host→engine ordinal imports resolved to **direct C calls** through the engine
+  export table. Glue regenerated across all modules (34,942 prototypes,
+  dispatcher over 34,942 functions, **16/32,618 unresolved stubs**).
+- **Combined build is link-clean**: 39 translation units compile with mingw gcc,
+  **0 errors / 0 warnings**, archive has **0 non-libc undefined symbols**.
 
 Toolkit fixes made along the way (folded back into `tools/`):
 - `gen_dispatch.py` now emits a public `recomp_dispatch` (the lift16 backend's
   fall-through / computed-jump entry), with a matching decl in the runtime
   header — previously only `dispatch_far`/`dispatch_near` existed.
-- `lift_module.py`: a generic, parameterized lift driver (vs catz's hardcoded
-  `lift_dll.py`), so any of Bob's three modules lifts with one command.
+- `ne_decode.py` zero-pads each segment's decode buffer so an IDA-verified
+  instruction head near the segment-data end can't read its trailing operand
+  bytes past the file slice (the Win16 loader zero-fills there anyway).
+- `lift_module.py` (single module) and `lift_combined.py` (all three, with
+  renumbering + cross-module ordinal resolution) replace catz's hardcoded
+  `lift_dll.py` / `lift_wad.py`.
 
-Next: lift **UTOPIAWA.EXE** (host, 9 segs) and **UTOPIA.DLL** (engine, 22 segs),
-then combine the three modules into one image (segment renumbering, like catz)
-and stand up the host loop for bringup.
+Next (bringup): build the **combined flat memory image** across the three
+modules (segment placement + relocations + a selector→base table), write the
+host `main.c` loop, and run `UTOPIAWA`'s `WinMain` through engine init.
 
-### Build & lift (UEXTRA, reproducible)
+### Build & lift (full, reproducible)
 
 ```bash
-py -3.11 tools/ida_export.py   game/install/UEXTRA.DLL analysis/uextra_ida.json
-py -3.11 tools/lift_module.py  game/install/UEXTRA.DLL analysis/uextra_ida.json
+# 1. IDA code maps (idalib, py 3.11) — accumulates analysis/win16_imports.json
+py -3.11 tools/ida_export.py game/install/UTOPIA.DLL            analysis/utopia_ida.json
+py -3.11 tools/ida_export.py game/install/UEXTRA.DLL           analysis/uextra_ida.json
+py -3.11 tools/ida_export.py game/install/UTOPIAWA/UTOPIAWA.EXE analysis/utopiawa_ida.json
+# 2. Lift all three modules into one segment space
+py -3.11 tools/lift_combined.py
+# 3. Regenerate glue across all modules
 py -3.11 tools/gen_stubs.py && py -3.11 tools/gen_dispatch.py
-py -3.11 tools/gen_win16_stubs.py game/install/UEXTRA.DLL
+py -3.11 tools/gen_win16_stubs.py game/install/UTOPIA.DLL game/install/UEXTRA.DLL game/install/UTOPIAWA/UTOPIAWA.EXE
 py -3.11 tools/gen_segments_h.py
-py -3.11 tools/gen_image.py    game/install/UEXTRA.DLL
-cmake -B build && cmake --build build
+# 4. Build (mingw gcc must be on PATH: export PATH=/c/msys64/mingw64/bin:$PATH)
+cmake -B build -G Ninja && cmake --build build
 ```
 
 ### Roadmap
 
 1. ✅ Recon — module map, imports, clusters, actor format
-2. 🟦 IDA code map + lift — **UEXTRA done (link-clean)**; UTOPIAWA + UTOPIA next
-3. ⬜ Bringup — host WinMain runs through engine init
+2. ✅ IDA code map + lift — **all three modules lift to link-clean C**
+3. 🟦 Bringup — combined flat image + host `main.c`; `WinMain` → engine init
 4. ⬜ First frame — render the Bob house room (WinG/DIB)
 5. ⬜ One actor on screen — load ROVER.ACT, draw a cel, play a voice clip
 6. ⬜ **LLM speech** — LLM + TTS drive the actor's existing animation/voice channel

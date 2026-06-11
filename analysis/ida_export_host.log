@@ -1,0 +1,13 @@
+Wrote analysis/utopiawa_ida.json: 9 code segments, 1541 functions, 101829 code heads
+Wrote D:\recomp\pc\bob\analysis\win16_imports.json: 9 modules, 316 named ordinals
+  COMMDLG      1 names
+  GDI          76 names
+  KERNEL       51 names
+  KEYBOARD     2 names
+  SHELL        2 names
+  USER         159 names
+  UTOPIA       24 names
+  UWAOLE       0 names
+  WIN87EM      1 names
+
+Loading IDA library from: C:\Program Files\IDA Professional 9.1\idalib.dll

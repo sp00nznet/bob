@@ -237,7 +237,11 @@ def disassemble_segment(seg: Segment, ne: NEHeader, show_relocs: bool = True) ->
         return [], [], {}
 
     reloc_map = build_reloc_map(seg, ne)
-    decoder = Decoder(seg.data, base_offset=seg.file_offset)
+    # Zero-pad a small tail so an instruction whose head IDA verified sits within
+    # the segment but whose trailing operand bytes run to the very end does not
+    # read past the file's segment slice (the Win16 loader zero-fills a segment's
+    # allocation beyond its file data anyway). Offsets are unaffected.
+    decoder = Decoder(seg.data + b'\x00' * 16, base_offset=seg.file_offset)
 
     # If IDA exported accurate instruction heads for this segment, decode at
     # exactly those offsets. This eliminates linear-sweep desync on data-in-code
