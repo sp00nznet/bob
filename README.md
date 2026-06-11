@@ -77,7 +77,11 @@ your own OEM/retail disc, then extract:
 7z x game/iso/U1.CAB -ogame/install   # UTOPIA.DLL, UTOPIAWA.EXE, ACTORS\*.ACT, ...
 ```
 
-## Status: Recon complete — module map, imports, and actor format mapped ✅
+## Status: UEXTRA.DLL lifts to link-clean C — pipeline proven ✅
+
+Recon is complete and the NE→C pipeline is proven end-to-end on the first
+module. **UEXTRA.DLL** (the actor blitter) lifts, compiles, and archives with
+**0 errors / 0 warnings**.
 
 Done so far:
 
@@ -91,17 +95,41 @@ Done so far:
 - **Actor (.ACT) format** decoded enough to enumerate: "LP" header, name table,
   and bodies that embed **RIFF/WAVE** voice clips + animation cels. 12 guides
   surveyed (`analysis/actors_summary.txt`), incl. Rover/Java/Scuzz/Ruby/Blythe.
-- **Project scaffold** in place: NE toolchain copied in, Win16 shim runtime
-  seeded from catz, CMake graph wired, analysis committed.
+- **IDA code map** exported for UEXTRA via idalib (36 functions, 1,997 code
+  heads; Win16 ordinal→name across 5 modules).
+- **UEXTRA.DLL lifted end-to-end**: both code segments → C, glue generated
+  (256 prototypes, dispatcher over 254 functions, only **2 unresolved stubs** of
+  256 targets), flat memory image built (136 relocations applied, 0 skipped).
+  Builds with mingw gcc to a static lib, **0 errors / 0 warnings**; every
+  undefined symbol is an expected Win16-shim or runtime extern.
 
-Next: export an IDA code map (Win16 ordinal→name + verified function bounds),
-then lift **UEXTRA.DLL** first (smallest, 11 KB) end-to-end as the pipeline
-shakedown, then UTOPIAWA, then UTOPIA.
+Toolkit fixes made along the way (folded back into `tools/`):
+- `gen_dispatch.py` now emits a public `recomp_dispatch` (the lift16 backend's
+  fall-through / computed-jump entry), with a matching decl in the runtime
+  header — previously only `dispatch_far`/`dispatch_near` existed.
+- `lift_module.py`: a generic, parameterized lift driver (vs catz's hardcoded
+  `lift_dll.py`), so any of Bob's three modules lifts with one command.
+
+Next: lift **UTOPIAWA.EXE** (host, 9 segs) and **UTOPIA.DLL** (engine, 22 segs),
+then combine the three modules into one image (segment renumbering, like catz)
+and stand up the host loop for bringup.
+
+### Build & lift (UEXTRA, reproducible)
+
+```bash
+py -3.11 tools/ida_export.py   game/install/UEXTRA.DLL analysis/uextra_ida.json
+py -3.11 tools/lift_module.py  game/install/UEXTRA.DLL analysis/uextra_ida.json
+py -3.11 tools/gen_stubs.py && py -3.11 tools/gen_dispatch.py
+py -3.11 tools/gen_win16_stubs.py game/install/UEXTRA.DLL
+py -3.11 tools/gen_segments_h.py
+py -3.11 tools/gen_image.py    game/install/UEXTRA.DLL
+cmake -B build && cmake --build build
+```
 
 ### Roadmap
 
 1. ✅ Recon — module map, imports, clusters, actor format
-2. ⬜ IDA code map + lift (UEXTRA → UTOPIAWA → UTOPIA), link-clean C
+2. 🟦 IDA code map + lift — **UEXTRA done (link-clean)**; UTOPIAWA + UTOPIA next
 3. ⬜ Bringup — host WinMain runs through engine init
 4. ⬜ First frame — render the Bob house room (WinG/DIB)
 5. ⬜ One actor on screen — load ROVER.ACT, draw a cel, play a voice clip

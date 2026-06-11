@@ -1,0 +1,35 @@
+{
+ "KERNEL": {
+  "1": "FATALEXIT",
+  "102": "DOS3CALL",
+  "131": "GETDOSENVIRONMENT",
+  "137": "FATALAPPEXIT",
+  "15": "GLOBALALLOC",
+  "16": "GLOBALREALLOC",
+  "17": "GLOBALFREE",
+  "178": "__WINFLAGS",
+  "18": "GLOBALLOCK",
+  "19": "GLOBALUNLOCK",
+  "20": "GLOBALSIZE",
+  "23": "LOCKSEGMENT",
+  "3": "GETVERSION",
+  "4": "LOCALINIT",
+  "90": "LSTRLEN"
+ },
+ "MSABC110": {
+  "1": "B$FPSIGNAL"
+ },
+ "MSAJT110": {
+  "197": "MSAJT110_197"
+ },
+ "USER": {
+  "1": "MESSAGEBOX",
+  "107": "DEFWINDOWPROC",
+  "42": "SHOWWINDOW",
+  "471": "LSTRCMPI",
+  "53": "DESTROYWINDOW"
+ },
+ "WIN87EM": {
+  "1": "__FPMATH"
+ }
+}

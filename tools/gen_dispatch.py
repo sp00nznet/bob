@@ -77,6 +77,19 @@ def main():
         '    }',
         '}',
         '',
+        '/* Direct transfer to a (selector,offset) the lift16 backend could not',
+        ' * name statically (segment-relative fall-through, computed near/far',
+        ' * jmp/call). Run the target on hit; on miss treat as a plain return',
+        ' * (the lifted call site already arranged any return frame). */',
+        'void recomp_dispatch(CPU *cpu, uint16_t seg, uint16_t off)',
+        '{',
+        '    if (!dispatch_lookup(cpu, seg, off)) {',
+        '#ifdef ELFISH_TRACE_RUNTIME',
+        '        fprintf(stderr, "recomp_dispatch MISS seg=%u off=%04X\\n", seg, off);',
+        '#endif',
+        '    }',
+        '}',
+        '',
     ]
 
     with open(OUT, 'w', encoding='utf-8', newline='\n') as f:
