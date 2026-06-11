@@ -22,9 +22,8 @@ if(SEGMENT_SOURCES)
     )
 endif()
 
-# Win16 API shim runtime (KERNEL/USER/GDI/WING/WAVMIX16/OLE2 -> Win32/SDL2)
-# plus the lifted-code support translation units (trace ring, etc.).
-file(GLOB RUNTIME_SOURCES CONFIGURE_DEPENDS runtime/win16/*.c runtime/*.c)
+# Win16 API shim runtime (KERNEL/USER/GDI/WING/WAVMIX16/OLE2 -> Win32/SDL2).
+file(GLOB RUNTIME_SOURCES CONFIGURE_DEPENDS runtime/win16/*.c)
 if(RUNTIME_SOURCES)
     add_library(bob_runtime STATIC ${RUNTIME_SOURCES})
     target_include_directories(bob_runtime PRIVATE runtime)

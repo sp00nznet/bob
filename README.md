@@ -77,12 +77,32 @@ your own OEM/retail disc, then extract:
 7z x game/iso/U1.CAB -ogame/install   # UTOPIA.DLL, UTOPIAWA.EXE, ACTORS\*.ACT, ...
 ```
 
-## Status: All three modules lift to link-clean C ✅
+## Status: Bringup — Bob boots and runs into MFC C-runtime init ✅
 
-Recon is complete and **all of Bob's code — the engine, the host, and the
-blitter — lifts to C, compiles, and links clean.** The three modules share one
-global segment space and one static archive; the only unresolved symbols are
-standard libc.
+All three modules lift to link-clean C **and the recompiled program runs.**
+`bob.exe` loads the combined flat image, sets up the selector→base table, and
+executes real lifted engine code — reaching the **MSVC/MFC C++ static-constructor
+init** during `UTOPIA` LibMain before stalling there (the current frontier).
+
+```
+Microsoft Bob Recomp - starting
+  image: build_data/mem_image.bin (1.17 MB)
+  engine entry: seg5:120D (UTOPIA LibMain), engine-data seg24
+  host entry:   seg35:0002 (UTOPIAWA), host-data seg40, stack seg40
+[win16] LOCKSEGMENT / DOS3CALL ...          <- real engine code calling Win16
+        ... stalls in the C++ ctor-table walk (seg005_38E4)
+```
+
+The stall is the expected bringup signal: the constructor-table walk needs the
+CRT startup chain (`seg002_0000` → …) and its data-relocated table bounds to be
+exactly right. That — plus implementing the Win16 shims each ctor reaches — is
+the next grind. See the roadmap below.
+
+### How it lifts (the three modules → one program)
+
+Recon is complete and **all of Bob's code — engine, host, and blitter — lifts to
+C, compiles, and links clean.** The three modules share one global segment space
+and one static archive; the only unresolved symbols are standard libc.
 
 | Module | Global segs | Result |
 |--------|-------------|--------|
@@ -130,10 +150,20 @@ Toolkit fixes made along the way (folded back into `tools/`):
 - `lift_module.py` (single module) and `lift_combined.py` (all three, with
   renumbering + cross-module ordinal resolution) replace catz's hardcoded
   `lift_dll.py` / `lift_wad.py`.
-
-Next (bringup): build the **combined flat memory image** across the three
-modules (segment placement + relocations + a selector→base table), write the
-host `main.c` loop, and run `UTOPIAWA`'s `WinMain` through engine init.
+- **Critical lift fix in `ne_lift.py`**: the toolkit `lift16` backend appends a
+  fall-through as `recomp_dispatch(cpu, abs>>4, abs&0xF)` using a *file*-absolute
+  address — meaningless as a (selector,offset) in the NE segmented model, so it
+  dispatch-missed and **returned early out of 19,421 functions**, including the
+  engine entry. `ne_lift` now drops that bogus tail and keeps its own
+  segment-aware fall-through. This is what turned "runs 1 instruction and
+  returns" into "runs real init."
+- `gen_image_bob.py`: builds the **combined flat image** for all three modules
+  (segment placement, internal relocations, selector table) + `mem_layout.h`.
+- `runtime/main.c`: the bring-up host — loads the image, sets up selectors,
+  runs UTOPIA LibMain then the UTOPIAWA entry. `-DBOB_WATCHDOG` dumps the call
+  ring if lifted code spins.
+- `win16.py`: PASCAL stack-purge entries for `LOCKSEGMENT`/`UNLOCKSEGMENT`/
+  `DOS3CALL`/… so those calls don't corrupt SP.
 
 ### Build & lift (full, reproducible)
 
@@ -148,15 +178,18 @@ py -3.11 tools/lift_combined.py
 py -3.11 tools/gen_stubs.py && py -3.11 tools/gen_dispatch.py
 py -3.11 tools/gen_win16_stubs.py game/install/UTOPIA.DLL game/install/UEXTRA.DLL game/install/UTOPIAWA/UTOPIAWA.EXE
 py -3.11 tools/gen_segments_h.py
-# 4. Build (mingw gcc must be on PATH: export PATH=/c/msys64/mingw64/bin:$PATH)
+# 4. Build the combined flat memory image
+py -3.11 tools/gen_image_bob.py
+# 5. Build + run (mingw gcc must be on PATH: export PATH=/c/msys64/mingw64/bin:$PATH)
 cmake -B build -G Ninja && cmake --build build
+./build/bob.exe build_data/mem_image.bin
 ```
 
 ### Roadmap
 
 1. ✅ Recon — module map, imports, clusters, actor format
 2. ✅ IDA code map + lift — **all three modules lift to link-clean C**
-3. 🟦 Bringup — combined flat image + host `main.c`; `WinMain` → engine init
+3. 🟦 Bringup — image + `main.c` **run real engine code**; now in MFC C++ ctor init
 4. ⬜ First frame — render the Bob house room (WinG/DIB)
 5. ⬜ One actor on screen — load ROVER.ACT, draw a cel, play a voice clip
 6. ⬜ **LLM speech** — LLM + TTS drive the actor's existing animation/voice channel

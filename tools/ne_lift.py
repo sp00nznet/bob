@@ -594,6 +594,16 @@ def lift_segment(ne: NEHeader, seg_num: int, func_offset: int = -1, xmod=None):
 
         code = lifter.lift_function(
             func.label, func_insts, seg.file_offset + func.offset, func.is_far)
+        # lift16 appends its own fall-through as `recomp_dispatch(cpu, abs>>4,
+        # abs&0xF)` using a FILE-absolute address — meaningless as a (selector,
+        # offset) in the NE segmented model, so it dispatch-misses and returns
+        # early, skipping the real fall-through code. We resolve fall-through
+        # below in segment-aware terms, so drop lift16's bogus tail line.
+        code = '\n'.join(
+            ln for ln in code.split('\n')
+            if not (ln.lstrip().startswith('recomp_dispatch(cpu,')
+                    and '/* fallthrough 0x' in ln)
+        )
         # Inject an entry-trace marker (compiles to nothing without -DELFISH_TRACE_FN)
         code = code.replace('{\n', '{\n    TRACE_FN("%s");\n' % func.label, 1)
 
