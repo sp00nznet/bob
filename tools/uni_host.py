@@ -169,18 +169,26 @@ def main():
 
     uc = Uc(UC_ARCH_X86, UC_MODE_32)                 # protected mode; D=0 descs
     GDT_ADDR = roundup(len(image), 0x1000)
-    TRAP_BASE = GDT_ADDR + 0x2000
-    uc.mem_map(0, roundup(TRAP_BASE + 0x12000, 0x1000))
+    TRAP_BASE = GDT_ADDR + 0x10000                   # GDT is a full 64 KB
+    GUARD_BASE = TRAP_BASE + 0x10000
+    uc.mem_map(0, roundup(GUARD_BASE + 0x20000, 0x1000))
     uc.mem_write(0, bytes(image))
     uc.mem_write(TRAP_BASE, b"\x90" * 0x10000)       # NOP fill; we stop before exec
 
-    gdt = bytearray((trap_seg + 1) * 8)
+    # FULL 8192-entry GDT so EVERY selector loads (matches the recomp's selector
+    # model: real segments at their index, the trap selector, and ALL OTHER
+    # selectors -> a guard region, exactly like sel_base[unknown]=GUARD. Without
+    # this, a `mov es, <bad sel>` (uninitialised Win16 instance data) #GP-faults
+    # where the recomp just reads guard zeros and continues.
+    def descr(b, acc):
+        return struct.pack('<HHBBBB', 0xFFFF, b & 0xFFFF, (b >> 16) & 0xFF,
+                           acc, 0x00, (b >> 24) & 0xFF)
+    # guard = data r/w, DPL=3 (0xF2) so selectors with any RPL (e.g. garbage
+    # 0x256F, RPL=3) load without a privilege #GP at CPL=0.
+    gdt = bytearray(descr(GUARD_BASE, 0xF2) * 8192)  # default: guard
     for n in range(1, maxidx + 1):
-        b = base[n]; acc = 0x9A if iscode.get(n) else 0x92
-        gdt[n*8:n*8+8] = struct.pack('<HHBBBB', 0xFFFF, b & 0xFFFF,
-                                     (b >> 16) & 0xFF, acc, 0x00, (b >> 24) & 0xFF)
-    gdt[trap_seg*8:trap_seg*8+8] = struct.pack('<HHBBBB', 0xFFFF, TRAP_BASE & 0xFFFF,
-                                   (TRAP_BASE >> 16) & 0xFF, 0x9A, 0x00, (TRAP_BASE >> 24) & 0xFF)
+        gdt[n*8:n*8+8] = descr(base[n], 0x9A if iscode.get(n) else 0x92)
+    gdt[trap_seg*8:trap_seg*8+8] = descr(TRAP_BASE, 0x9A)
     uc.mem_write(GDT_ADDR, bytes(gdt))
     uc.reg_write(UC_X86_REG_GDTR, (0, GDT_ADDR, len(gdt) - 1, 0))
     uc.reg_write(UC_X86_REG_CR0, uc.reg_read(UC_X86_REG_CR0) | 1)   # PE
@@ -197,6 +205,7 @@ def main():
          for n in ('ax','bx','cx','dx','si','di','bp','sp','cs','ds','es','ss','ip')}
     rd = lambda n: uc.reg_read(R[n]); wr = lambda n, v: uc.reg_write(R[n], v & 0xFFFF)
 
+    ITFROM = int(sys.argv[sys.argv.index("--itfrom")+1]) if "--itfrom" in sys.argv else 0
     st = {"n": 0, "last_fn": None}
     from win16 import get_purge
     # Auto-mirror the recomp's simple one-line shims (void X(CPU*){cpu->ax=N; ret(cpu,P);})
@@ -252,6 +261,9 @@ def main():
             wr('cs', rcs); wr('sp', sp + 4 + purge)
             st['resume'] = rip
             uc.emu_stop(); return
+        if "--itrace" in sys.argv and st["n"] >= ITFROM:
+            print(f"  i[{st['n']:5}] seg{seg}:{rd('ip'):04X} (lin {address:#08x}) "
+                  f"bytes={bytes(uc.mem_read(address, min(size,6))).hex()}")
         # function-entry trace (only host/engine code segs, not trap)
         fn = funcs.get((seg, rd('ip')))
         if fn and fn != st["last_fn"]:
