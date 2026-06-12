@@ -238,6 +238,36 @@ class NELifter(Lifter):
                                        f'{orig} -- offset of {mod}.{r.ordinal}')
                             return
 
+        # --- Relocated `push imm16`: `push seg X` / `push offset Y` ---
+        # Win16 C passes a far pointer argument as `push seg; push offset; call`.
+        # The selector/offset immediates carry SELECTOR(2)/OFFSET16(5) fixups (the
+        # raw bytes are a placeholder). The mov-immediate path above doesn't cover
+        # push, so without this the placeholder selector is pushed verbatim and a
+        # later `call far [arg]` dispatches to a bogus segment (e.g. seg035_06D0
+        # was handed 0x41A:37F8 instead of seg036:37F8 -> 257 missed calls).
+        if m == 'push' and op1 and op1.type in (OpType.IMM8, OpType.IMM16):
+            for off in range(local_off + 1, local_off + inst.length):
+                ann = self._get_reloc_at(off)
+                if not ann:
+                    continue
+                r = ann.reloc
+                tt = r.flags & 3
+                if r.src_type == 2 and tt == 0:                 # SELECTOR of a symbol
+                    self._emit(f'push16(cpu, SEG_{r.target_seg});',
+                               f'{orig} -- selector for seg{r.target_seg}')
+                    return
+                if r.src_type == 2 and tt in (1, 2):            # cross-module selector
+                    mod = module_name(self.ne, r.module_idx)
+                    xm = self.xmod.get(mod.upper())
+                    if xm and r.ordinal in xm:
+                        self._emit(f'push16(cpu, SEG_{xm[r.ordinal][0]});',
+                                   f'{orig} -- selector for {mod}.{r.ordinal}')
+                        return
+                if r.src_type == 5 and tt == 0:                 # OFFSET16 of a symbol
+                    self._emit(f'push16(cpu, 0x{r.target_off & 0xFFFF:04X});',
+                               f'{orig} -- offset of seg{r.target_seg}:{r.target_off:04X}')
+                    return
+
         # --- Default: delegate to base lifter ---
         super().lift_instruction(inst, func_start)
 

@@ -96,10 +96,44 @@ def scan_data_farptrs(ne, ida_off):
     return out
 
 
+def scan_pushed_code_farptrs(ne, ida_off):
+    """Find code entry points built inline as `push seg X; push offset Y; call`
+    (a Win16 far-proc argument). The segment push carries a SELECTOR(2) fixup to
+    code segment X; the immediately following instruction is `push imm16` (0x68)
+    whose immediate is the code offset Y (Y is NOT relocated -- offsets are final;
+    IDA only knows it's code via xref). Promote (X, Y) when Y is an IDA code-head
+    so the later `call far [arg]` dispatches to a real function instead of
+    missing (e.g. seg036:0x37F8, called 257x as a no-op before this).
+
+    Uses build_reloc_map so chained SELECTOR fixups are covered. Call AFTER
+    offset_module (seg numbers global). `ida_off` is the offset-keyed IDA map."""
+    from ne_decode import build_reloc_map
+    code_idx = {s.index for s in ne.segments if s.is_code}
+    out = {}
+    for s in ne.segments:
+        if not s.data:
+            continue
+        rm = build_reloc_map(s, ne)
+        for off, ann in rm.items():
+            r = ann.reloc
+            if (r.flags & 3) != 0 or r.src_type != 2:    # internal SELECTOR
+                continue
+            if r.target_seg not in code_idx:
+                continue
+            # seg push is `68 <imm16>`; the next op must be `push imm16` (0x68).
+            if off + 4 >= len(s.data) or s.data[off + 2] != 0x68:
+                continue
+            y = struct.unpack_from('<H', s.data, off + 3)[0]
+            heads = ida_off.get(str(r.target_seg), {}).get('heads')
+            if heads and y in set(heads):
+                out.setdefault(str(r.target_seg), set()).add(y)
+    return out
+
+
 def build_ida_map(src_name, offset, ne):
-    """Load the IDA map, re-key to global seg numbers, fold in data far-pointer
-    code entries, write to disk and point ELFISH_IDA_JSON at it. Returns the
-    augmented offset map (or {} if no IDA source)."""
+    """Load the IDA map, re-key to global seg numbers, fold in far-pointer code
+    entries (data tables + inline `push seg/offset`), write to disk and point
+    ELFISH_IDA_JSON at it. Returns the augmented offset map (or {} if no IDA)."""
     src = os.path.join(ANALYSIS, src_name)
     if not os.path.exists(src):
         os.environ.pop('ELFISH_IDA_JSON', None)
@@ -108,6 +142,9 @@ def build_ida_map(src_name, offset, ne):
     data = json.load(open(src, encoding='utf-8'))
     off = {str(int(k) + offset): v for k, v in data.items()}
     extra = scan_data_farptrs(ne, off)
+    pushed = scan_pushed_code_farptrs(ne, off)
+    for gseg, offs in pushed.items():
+        extra.setdefault(gseg, set()).update(offs)
     n = 0
     for gseg, offs in extra.items():
         funcs = set(off[gseg].get('functions', []))
@@ -116,7 +153,7 @@ def build_ida_map(src_name, offset, ne):
             off[gseg]['functions'] = sorted(funcs | offs)
             n += len(new)
     if n:
-        print(f"  +{n} far-pointer-table code entries promoted to functions")
+        print(f"  +{n} far-pointer code entries promoted to functions")
     dst = os.path.join(ANALYSIS, src_name.replace('.json', f'_lift{offset}.json'))
     json.dump(off, open(dst, 'w', encoding='utf-8'))
     os.environ['ELFISH_IDA_JSON'] = dst
