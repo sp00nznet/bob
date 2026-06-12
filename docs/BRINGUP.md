@@ -206,13 +206,23 @@ calls — the promoted ctors/vtable methods now run), and the host advances from
 251 → ~1193 calls, running real MFC `InitInstance` (`LoadString`,
 `GetModuleHandle`, `SetWindowsHookEx`, …).
 
-### Current frontier: MFC InitInstance
+### Current frontier: MFC InitInstance returns FALSE
 
-The host now runs MFC `CWinApp::InitInstance` and still exits before creating a
-window (no `CreateWindow` yet) → R6021 fallback. Next: trace `seg032` through
-InitInstance to the stub returning failure (`LoadString`/`SetWindowsHookEx`
-purge+return, or a resource the stub returns empty for), and make the
-process-exit path terminate rather than fall through to R6021.
+WinMain gets past `InitApplication` (virtual `0x3C` now hits) and calls
+`InitInstance` (virtual `0x40`), which returns FALSE → straight to teardown
+(`seg032_3CB3 → 3D09 → 3D14`), skipping `Run` (the message loop), so the C0
+startup falls to the R6021 fallback. Implemented `SetWindowsHook`/`Ex` (purge
+6/10, return non-zero HHOOK) — didn't unblock; InitInstance fails deeper.
+
+**Top lead:** with `dispatch_far` miss-tracing (`-DELFISH_TRACE_RUNTIME`), the
+engine phase is clean (5 misses) but the host phase has **273 misses dominated
+by 257× `dispatch_far MISS seg=1050 off=37F8`**, all early in host startup
+(right after LibMain). Selector `1050` (`0x41A`) is not a real segment (host is
+31–40), so an early host far-call loops through a bogus/unrelocated far pointer.
+Next: find that call site (a `call/jmp far [mem]` whose pointer reads
+`041A:37F8`) — likely an un-relocated far pointer or a Win16 selector value the
+flat model doesn't map — and resolve it; it may well be what makes InitInstance
+report failure.
 
 ## Already fixed this milestone
 

@@ -435,6 +435,14 @@ void USER_REGISTERCLASS(CPU *cpu) {
     if (atom == 0) atom = 0xC001;
     ret(cpu, 4);
 }
+/* SetWindowsHook(nFilterType, pfnFilterProc): 2+4 = 6 bytes; returns prev hook
+ * (non-zero handle). SetWindowsHookEx(idHook, lpfn, hMod, hTask): 2+4+2+2 = 10.
+ * The stub guessed purge 0 (corrupting the stack) and returned 0 (= failure,
+ * which made MFC InitInstance bail). Return a non-zero HHOOK. */
+void USER_SETWINDOWSHOOK(CPU *cpu)   { cpu->ax = 0x4801; ret(cpu, 6); }
+void USER_SETWINDOWSHOOKEX(CPU *cpu) { cpu->ax = 0x4802; ret(cpu, 10); }
+void USER_UNHOOKWINDOWSHOOK(CPU *cpu)   { cpu->ax = 1; ret(cpu, 4); }
+void USER_UNHOOKWINDOWSHOOKEX(CPU *cpu) { cpu->ax = 1; ret(cpu, 4); }
 void USER_GETSYSTEMMENU(CPU *cpu)  { cpu->ax = FAKE_HANDLE; ret(cpu, 4); }
 void USER_APPENDMENU(CPU *cpu)     { cpu->ax = 1; ret(cpu, 10); }
 void USER_LOADICON(CPU *cpu)       { cpu->ax = FAKE_HANDLE; ret(cpu, 6); }
