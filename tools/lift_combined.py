@@ -45,21 +45,22 @@ MODULES = [
 
 def rekey_ida(src_name, offset):
     """Re-key an IDA code map (NE seg -> data) to offset segment numbers and
-    point ELFISH_IDA_JSON at it. Returns False if the source map is missing."""
+    point ELFISH_IDA_JSON at it. Returns the loaded (un-offset) map, or {} if
+    the source is missing."""
     src = os.path.join(ANALYSIS, src_name)
     if not os.path.exists(src):
         os.environ.pop('ELFISH_IDA_JSON', None)
         print(f"  (no {src_name} -- linear sweep)")
-        return False
+        return {}
+    data = json.load(open(src, encoding='utf-8'))
     if offset == 0:
         os.environ['ELFISH_IDA_JSON'] = src
-        return True
-    data = json.load(open(src, encoding='utf-8'))
+        return data
     off = {str(int(k) + offset): v for k, v in data.items()}
     dst = os.path.join(ANALYSIS, src_name.replace('.json', f'_off{offset}.json'))
     json.dump(off, open(dst, 'w', encoding='utf-8'))
     os.environ['ELFISH_IDA_JSON'] = dst
-    return True
+    return data
 
 
 def offset_module(ne, offset):
@@ -83,17 +84,31 @@ def main():
     for path, offset, ida in MODULES:
         name = os.path.basename(path)
         ne = engine if offset == 0 else parse_ne(path)
-        rekey_ida(ida, offset)
+        ida_map = rekey_ida(ida, offset)
         offset_module(ne, offset)
         code = [s for s in ne.segments if s.is_code]
-        print(f"{name}: offset {offset} -> code segs {code[0].index}..{code[-1].index}")
+        # A "code" segment that IDA found NO instructions in is really a data
+        # blob (e.g. UTOPIA seg 1, a far-pointer dispatch table). Lifting it via
+        # linear sweep yields garbage callable functions that execution can
+        # derail into. Skip it: it stays in the flat image as data (with its
+        # SELECTOR relocations applied by gen_image_bob).
+        lift_segs, data_segs = [], []
         for s in code:
+            orig = s.index - offset                 # key in the un-offset IDA map
+            heads = ida_map.get(str(orig), {}).get('heads', [])
+            (lift_segs if heads or not ida_map else data_segs).append(s)
+        if data_segs:
+            print(f"{name}: offset {offset} -> {len(lift_segs)} code segs; "
+                  f"data-only (no IDA code): {[s.index for s in data_segs]}")
+        else:
+            print(f"{name}: offset {offset} -> code segs "
+                  f"{lift_segs[0].index}..{lift_segs[-1].index}")
+        for s in lift_segs:
             out = os.path.join(SRC, f'seg{s.index:03d}.c')
             with open(out, 'w', encoding='utf-8', newline='\n') as f:
                 with contextlib.redirect_stdout(f):
                     ne_lift.lift_segment(ne, s.index, xmod=xmod)
             total += 1
-        print(f"  wrote {len(code)} segments")
     print(f"lifted {total} segments across {len(MODULES)} modules")
 
 

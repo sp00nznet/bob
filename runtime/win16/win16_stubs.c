@@ -448,7 +448,7 @@ void USER_REALIZEPALETTE(CPU *cpu) { (void)cpu; WIN16_LOG("REALIZEPALETTE"); cpu
 void USER_REDRAWWINDOW(CPU *cpu) { (void)cpu; WIN16_LOG("REDRAWWINDOW"); cpu->ax = 0; cpu->sp += 4 + 10; }
 void USER_REGISTERCLASS(CPU *cpu) { (void)cpu; WIN16_LOG("REGISTERCLASS"); cpu->ax = 0; cpu->sp += 4 + 4; }
 void USER_REGISTERCLIPBOARDFORMAT(CPU *cpu) { (void)cpu; WIN16_LOG("REGISTERCLIPBOARDFORMAT"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("REGISTERCLIPBOARDFORMAT"); }
-void USER_REGISTERWINDOWMESSAGE(CPU *cpu) { (void)cpu; WIN16_LOG("REGISTERWINDOWMESSAGE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("REGISTERWINDOWMESSAGE"); }
+void USER_REGISTERWINDOWMESSAGE(CPU *cpu) { (void)cpu; WIN16_LOG("REGISTERWINDOWMESSAGE"); cpu->ax = 0; cpu->sp += 4 + 4; }
 void USER_RELEASECAPTURE(CPU *cpu) { (void)cpu; WIN16_LOG("RELEASECAPTURE"); cpu->ax = 0; cpu->sp += 4 + 0; }
 void USER_RELEASEDC(CPU *cpu) { (void)cpu; WIN16_LOG("RELEASEDC"); cpu->ax = 0; cpu->sp += 4 + 4; }
 void USER_SCREENTOCLIENT(CPU *cpu) { (void)cpu; WIN16_LOG("SCREENTOCLIENT"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("SCREENTOCLIENT"); }

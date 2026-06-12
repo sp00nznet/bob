@@ -82,6 +82,74 @@ never returns.
    load-time relocated (seg 24 has only 22 relocs, none at these offsets) — so
    this is about executing the init correctly, not a missing image relocation.
 
+## Update — two roots found (IDA-verified)
+
+**1. UTOPIA NE seg 1 is a data segment mis-flagged CODE (FIXED).**
+IDA reports **zero** code in seg 1 (every other segment is fully covered); its
+bytes are a far-pointer dispatch table (`{offset, selector}` pairs, 20 SELECTOR
+relocations) and it's only ever referenced as a *selector* (`mov reg, SEG_1`),
+never far-called. The lifter was linear-sweeping it into 34 KB of garbage
+callable functions that execution derailed into. `lift_combined.py` now skips
+any "code" segment IDA found no instruction heads in — it stays in the flat
+image as data with its relocations applied. (Unresolved stubs 16 → 10.)
+
+**2. The continuation jmp derails because DS ≠ SS (the open frontier).**
+With seg 1 fixed, init gets to `seg005_38DF: jmp ss:off_20` (IDA-confirmed: a
+real absolute `jmp far ss:[0x20]`, not a dropped frame base). Runtime probe at
+that point:
+
+```
+seg005_38DF: ds=0018(24) es=0000 ss=0028(40) sp=FF90 bp=FFA0  ss:[0x20]=0028:0014
+```
+
+`ss:[0x20]` resolves into **host DGROUP (seg 40)** static data — `40:0x14`, which
+is itself a data table — so `dispatch_far(40,0x14)` misses and control unwinds
+into host code (`seg036`) with `ds` later clobbered to 0. Root cause: this
+engine C-runtime code accesses a global far-pointer via `ss:[abs]` assuming the
+**small-model invariant SS == DS == DGROUP**, but we run LibMain with
+`ds=24` (engine DGROUP) and `ss=40` (host stack), so the `ss:`-relative global
+read hits the wrong segment.
+
+Neither `40:0x20`→`40:0x14` nor `24:0x20`→`4473:495B` is a valid code pointer,
+so `ss:[0x20]` is a **runtime-initialized continuation** that the init is
+supposed to populate (setjmp-style) and hasn't — consistent with the DS≠SS
+mismatch corrupting which segment the store/läs land in.
+
+### Next hypotheses (highest-leverage)
+
+1. **Run engine LibMain small-model (SS = DS = engine DGROUP 24).** Requires the
+   DGROUP/stack segment to be allocated a full 64 KB in `gen_image_bob.py` so
+   `sp=0xFFFE` fits (currently segments are packed to actual size). This is the
+   most likely single fix — it makes `ss:[abs]` global access read the engine's
+   own DGROUP.
+2. If small-model SS regresses other code, instead find the writer of
+   `ss:[0x20]` (the setjmp-equivalent) and verify it stores a valid continuation
+   under our segment model.
+3. Confirm DGROUP segments (24, 40) are 64 KB-allocated with the stack at the
+   top — the host worked with `sp=0xFFFE` in seg 40 possibly by luck.
+
+## RESOLVED — engine init completes (24,680 calls) ✅
+
+Both roots above were fixed and **`UTOPIA` LibMain now runs to a clean return**
+(`ax=0100`, 24,680 lifted calls). The `seg019_0000`-heavy "spin" was legitimate
+MFC class registration that converges. Along the way it does real Win16 work:
+`GlobalAlloc(2002,4096)->4000`, `RegisterWindowMessage`, `DeferWindowPos`,
+`ScreenToClient`, `GetParent`, etc. (purge values added as reached).
+
+The 64 KB-DGROUP + small-model `SS=DS` change was the decisive fix: it took init
+from frozen-at-93-calls to completing at 24,680.
+
+## Next frontier — the UTOPIAWA host startup
+
+After LibMain returns, `main.c` runs the host entry `seg035_0002` (UTOPIAWA's
+Borland C0 → WinMain). It enters the host's **own** MFC C-runtime/module-state
+init (`seg035_0002 → 0010 → 0014 → 0018 → 10C8 → 1151 …`, looping through
+`seg035_022D/023F`) and then derails into a garbage call (`FN ` with a null
+name) — the same class of work as the engine, now on the host module. The host
+already runs small-model (`SS=DS=`host DGROUP 40, 64 KB). Likely the host needs
+the same kind of per-module fix-ups; trace `seg035` startup the same way
+(`-DCATZ_TRACE_FN`, `-DBOB_WATCHDOG`).
+
 ## Already fixed this milestone
 
 - The 19,421-function early-return bug (`ne_lift.py` stripping lift16's bogus

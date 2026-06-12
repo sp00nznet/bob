@@ -77,28 +77,38 @@ your own OEM/retail disc, then extract:
 7z x game/iso/U1.CAB -ogame/install   # UTOPIA.DLL, UTOPIAWA.EXE, ACTORS\*.ACT, ...
 ```
 
-## Status: Bringup — Bob boots and runs into MFC C-runtime init ✅
+## Status: Bringup — UTOPIA engine init runs to completion ✅
 
-All three modules lift to link-clean C **and the recompiled program runs.**
-`bob.exe` loads the combined flat image, sets up the selector→base table, and
-executes real lifted engine code — reaching the **MSVC/MFC C++ static-constructor
-init** during `UTOPIA` LibMain before stalling there (the current frontier).
+All three modules lift to link-clean C **and the recompiled engine fully
+initializes.** `bob.exe` loads the combined flat image, sets up selectors, and
+runs `UTOPIA` LibMain through **24,680 lifted calls to a clean return** —
+including real Win16 work (`GlobalAlloc`, `RegisterWindowMessage`,
+`DeferWindowPos`, …) and MFC's full module-state + C++ class registration.
 
 ```
 Microsoft Bob Recomp - starting
-  image: build_data/mem_image.bin (1.17 MB)
+  image: build_data/mem_image.bin (1.30 MB)
   engine entry: seg5:120D (UTOPIA LibMain), engine-data seg24
   host entry:   seg35:0002 (UTOPIAWA), host-data seg40, stack seg40
-[win16] LOCKSEGMENT / DOS3CALL ...          <- real engine code calling Win16
-        ... stalls in the C++ ctor-table walk (seg005_38E4)
+[win16] GlobalAlloc(flags=2002, 4096) -> 4000      <- real engine init
+[win16] REGISTERWINDOWMESSAGE / DEFERWINDOWPOS ...
+UTOPIA LibMain returned (ax=0100) after 24680 lifted calls   ✅ engine init done
 ```
 
-The stall is now traced precisely to **MFC's 16-bit module-state init** — a
-continuation-pointer state machine over DGROUP cells (`ds:[0x9446]` handler,
-`ds:[0x7E54]` state ptr, `ss:[0x20]`) that must be populated in order during
-init. It calls no Win16 shims; it's pure lifted computation that isn't
-converging. Full trace, the exact mechanism, and a prioritized next-step
-checklist are in **[docs/BRINGUP.md](docs/BRINGUP.md)**.
+Two fixes unlocked this (see **[docs/BRINGUP.md](docs/BRINGUP.md)**):
+1. **NE seg 1 is data, not code** — IDA found zero instructions in it (it's a
+   far-pointer dispatch table); the lifter was linear-sweeping it into 34 KB of
+   garbage functions that execution derailed into. `lift_combined.py` now skips
+   any "code" segment with no IDA heads (kept as data in the image).
+2. **64 KB DGROUP + small-model SS=DS** — the engine C-runtime accesses globals
+   via `ss:[abs]` assuming `SS==DS==DGROUP`. `gen_image_bob.py` now allocates
+   DGROUP/stack segments a full 64 KB (statics at the bottom, stack at the top),
+   and LibMain runs with `SS=DS=`engine DGROUP. This took init from stalling at
+   93 calls to completing at 24,680.
+
+**Current frontier:** the **UTOPIAWA host** startup (`seg035`, its own MFC
+C-runtime/module-state init) loops and then derails — the same class of bringup
+work, now on the host module.
 
 ### How it lifts (the three modules → one program)
 
@@ -191,7 +201,7 @@ cmake -B build -G Ninja && cmake --build build
 
 1. ✅ Recon — module map, imports, clusters, actor format
 2. ✅ IDA code map + lift — **all three modules lift to link-clean C**
-3. 🟦 Bringup — image + `main.c` **run real engine code**; now in MFC C++ ctor init
+3. 🟦 Bringup — **UTOPIA engine init runs to completion (24,680 calls)**; host startup next
 4. ⬜ First frame — render the Bob house room (WinG/DIB)
 5. ⬜ One actor on screen — load ROVER.ACT, draw a cel, play a voice clip
 6. ⬜ **LLM speech** — LLM + TTS drive the actor's existing animation/voice channel

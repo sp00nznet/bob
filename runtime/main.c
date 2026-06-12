@@ -84,6 +84,29 @@ void dump_fn_ring(int n)
     fprintf(stderr, "--- end (total calls=%u) ---\n", g_fn_ring_pos);
 }
 
+#ifdef CATZ_WATCH_SP
+/* Flag the first time guest SP jumps UP sharply between function entries — a
+ * callee that returned with an imbalanced stack (bad epilogue / unrestored
+ * push / wrong retf cleanup). Pinpoints the offending function. */
+void catz_sp_check(const char *nm)
+{
+    static uint16_t last = 0xFFFE; static int armed = 0, fired = 0;
+    uint16_t sp = g_cpu ? g_cpu->sp : 0xFFFE;
+    if (sp < 0xF000) armed = 1;
+    if (!fired && armed && sp > last && (uint16_t)(sp - last) > 0x100 && sp > 0xFD00) {
+        fired = 1;
+        fprintf(stderr, "[SP-RISE] at %s: sp %04X -> %04X (+%04X). recent:",
+                nm, last, sp, (uint16_t)(sp - last));
+        for (int i = 10; i > 0; i--) {
+            const char *r = g_fn_ring[(g_fn_ring_pos - (unsigned)i) & (CATZ_FN_RING_SIZE - 1)];
+            if (r) fprintf(stderr, " %s", r);
+        }
+        fprintf(stderr, "\n");
+    }
+    last = sp;
+}
+#endif
+
 static int load_image(CPU *cpu, const char *path)
 {
     FILE *f = fopen(path, "rb");
@@ -130,10 +153,13 @@ int main(int argc, char *argv[])
            CATZ_ENTRY_SEG, CATZ_ENTRY_IP, CATZ_AUTO_DATA_SEG, CATZ_STACK_SEG);
     fflush(stdout);
 
-    /* 1) Initialize the UTOPIA engine (LibMain) with the engine DGROUP in DS. */
+    /* 1) Initialize the UTOPIA engine (LibMain). The engine's C-runtime startup
+     *    accesses DGROUP globals via ss:[abs] (small-model SS==DS==DGROUP), so
+     *    run it with SS=DS=engine DGROUP (now allocated a full 64 KB so the
+     *    stack at sp=0xFFFE and the statics at the bottom share one segment). */
     cpu.ds = cpu.es = CATZ_DLL_AUTO_DATA_SEG;
-    cpu.ss = CATZ_STACK_SEG;
-    cpu.sp = CATZ_STACK_SP ? CATZ_STACK_SP : 0xFFFE;
+    cpu.ss = CATZ_DLL_AUTO_DATA_SEG;
+    cpu.sp = 0xFFFE;
     cpu.cs = CATZ_DLL_ENTRY_SEG;
 #ifdef BOB_WATCHDOG
     CreateThread(NULL, 0, watchdog_thread, NULL, 0, NULL);

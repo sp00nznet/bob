@@ -101,10 +101,25 @@ def main():
     all_segs = [s for ne, _ in mods for s in ne.segments]
     max_index = max(s.index for s in all_segs)
 
+    # DGROUP / stack segments must be allocated a full 64 KB: Win16 puts a
+    # module's statics at the bottom and its stack at the top of the SAME
+    # segment, so code that touches ss:[small] (a global) and code that pushes
+    # near sp=0xFFFE must land in one contiguous 64 KB region. Packing them to
+    # actual size splits those into different image areas and derails any
+    # ss:[abs] global access. Collect each module's auto-data + stack segment.
+    full64 = set()
+    for ne, off in mods:
+        if ne.auto_data_seg:
+            full64.add(off + ne.auto_data_seg)
+        if ne.ss:
+            full64.add(off + ne.ss)
+
     base = [0] * MAX_SEL
     cursor = PARA                               # guard paragraph at offset 0
     for s in all_segs:
         sz = max(s.actual_size, s.alloc_size, 1)
+        if s.index in full64:
+            sz = max(sz, MAX_SEL)               # full 64 KB DGROUP/stack
         base[s.index] = cursor
         cursor += roundup(sz, PARA)
     guard_base = cursor
