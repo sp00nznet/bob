@@ -155,6 +155,17 @@ def main():
     image, base, mods, maxidx, applied, iscode = build_image()
     engine, _ = mods[0]; host, hoff = mods[2]
     imports, trap_seg = build_imports(image, base, mods)
+    # PSP env-segment field: each instance/DGROUP holds at offset 0x2C the
+    # selector of its environment block (DOS PSP:0x2C). The real loader sets this
+    # up; our image has static garbage there, which the host reads as a selector
+    # (getenv scan at seg035_013D). The recomp tolerates the bad selector (es ->
+    # guard zeros -> empty env); the uni's strict descriptor check rejects it.
+    # Point it at a zeroed env so both behave as "empty env" and the diff
+    # continues. ENV_SEL (RPL=0) maps to the guard region via the full GDT.
+    ENV_SEL = (trap_seg + 1) << 3
+    for ne, off in mods:
+        if ne.auto_data_seg:
+            struct.pack_into('<H', image, base[off + ne.auto_data_seg] + 0x2C, ENV_SEL)
     print(f"image {len(image)} bytes, segs 1..{maxidx}, internal relocs {applied}, "
           f"imports {len(imports)} (trap seg {trap_seg})")
 

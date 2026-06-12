@@ -283,15 +283,25 @@ with a DPL=3 guard descriptor (a stricter-than-textbook Unicorn quirk; CPL=3
 isn't reachable without a TSS). So the harness can't paper over this particular
 load.
 
-That actually **sharpens the conclusion**: `seg40:0x2C` is genuinely supposed to
-be loader-initialised instance data (a valid selector or 0), and `0x256F` is
-static DGROUP bytes the program never should read as a selector here. The recomp
-only "gets past" it by not validating selectors (es := 0x256F → guard), then
-runs ~4,300 more calls on garbage instance data — which is very plausibly why it
-never creates a window. **Next: initialise the Win16 instance/task data** (find
-what writes `seg40:0x2C` / the DGROUP instance header during a real
-InitTask/loader, and reproduce it in the recomp's runtime). The harness
-(`uni_host.py`, `--itrace --itfrom N`) is the oracle to verify each field.
+**Identified: `seg40:0x2C` is the DOS PSP environment-segment field.**
+`seg035_013D` is a `getenv` (it `repz cmpsb` a 13-byte name against `es:[di]`
+and `scasb`-skips strings), so `es:[0x2C]` is the **environment block selector**
+(PSP:0x2C). The real loader sets it up; our image has static garbage there. The
+recomp tolerates it (garbage selector → guard zeros → empty env → continues), so
+**this is NOT the recomp bug** — it's a harness gap. Pointing each DGROUP's
+`0x2C` at a zeroed env (`ENV_SEL` → guard, via the full GDT) in `uni_host.py`
+lets the uni load it as "empty env", matching the recomp.
+
+**With that, the harness runs 2,681 instructions and the uni trace matches the
+recomp for 26 functions** (`seg035_0002 … 06F2`), then diverges in the **C++
+static-constructor walk** (`seg035_022D/023F`): the recomp exits the walk loop
+**one iteration earlier** than the original, after which their stacks differ and
+the same ctors (`seg033_19CD/19C4/127D/128C`) get called in a slightly different
+interleaving. `seg033_128C` itself is faithful (clean `retf 0x4`); the off-by-one
+is upstream in the walk loop (`cmp si,di` / the `ax=[di]|[di+2]; je` null-skip).
+**Next: instruction-diff the `seg035_022D` walk between uni and recomp to find
+the flag/iteration mismatch — likely a real lifting bug in the loop's compare or
+null test.** That, finally, is a candidate for an actual recomp defect.
 
 ### Resource subsystem wired for Bob; frontier refined to "no main window"
 
