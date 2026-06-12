@@ -472,8 +472,6 @@ void USER_SETSCROLLPOS(CPU *cpu) { (void)cpu; WIN16_LOG("SETSCROLLPOS"); cpu->ax
 void USER_SETTIMER(CPU *cpu) { (void)cpu; WIN16_LOG("SETTIMER"); cpu->ax = 0; cpu->sp += 4 + 10; }
 void USER_SETWINDOWLONG(CPU *cpu) { (void)cpu; WIN16_LOG("SETWINDOWLONG"); cpu->ax = 0; cpu->sp += 4 + 8; }
 void USER_SETWINDOWPOS(CPU *cpu) { (void)cpu; WIN16_LOG("SETWINDOWPOS"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("SETWINDOWPOS"); }
-void USER_SETWINDOWSHOOK(CPU *cpu) { (void)cpu; WIN16_LOG("SETWINDOWSHOOK"); cpu->ax = 0; cpu->sp += 4 + 6; }
-void USER_SETWINDOWSHOOKEX(CPU *cpu) { (void)cpu; WIN16_LOG("SETWINDOWSHOOKEX"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("SETWINDOWSHOOKEX"); }
 void USER_SETWINDOWTEXT(CPU *cpu) { (void)cpu; WIN16_LOG("SETWINDOWTEXT"); cpu->ax = 0; cpu->sp += 4 + 6; }
 void USER_SETWINDOWWORD(CPU *cpu) { (void)cpu; WIN16_LOG("SETWINDOWWORD"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("SETWINDOWWORD"); }
 void USER_SHOWCARET(CPU *cpu) { (void)cpu; WIN16_LOG("SHOWCARET"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("SHOWCARET"); }
@@ -485,8 +483,6 @@ void USER_TABBEDTEXTOUT(CPU *cpu) { (void)cpu; WIN16_LOG("TABBEDTEXTOUT"); cpu->
 void USER_TRACKPOPUPMENU(CPU *cpu) { (void)cpu; WIN16_LOG("TRACKPOPUPMENU"); cpu->ax = 0; cpu->sp += 4 + 14; }
 void USER_TRANSLATEACCELERATOR(CPU *cpu) { (void)cpu; WIN16_LOG("TRANSLATEACCELERATOR"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("TRANSLATEACCELERATOR"); }
 void USER_TRANSLATEMESSAGE(CPU *cpu) { (void)cpu; WIN16_LOG("TRANSLATEMESSAGE"); cpu->ax = 0; cpu->sp += 4 + 4; }
-void USER_UNHOOKWINDOWSHOOK(CPU *cpu) { (void)cpu; WIN16_LOG("UNHOOKWINDOWSHOOK"); cpu->ax = 0; cpu->sp += 4 + 4; }
-void USER_UNHOOKWINDOWSHOOKEX(CPU *cpu) { (void)cpu; WIN16_LOG("UNHOOKWINDOWSHOOKEX"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("UNHOOKWINDOWSHOOKEX"); }
 void USER_UNIONRECT(CPU *cpu) { (void)cpu; WIN16_LOG("UNIONRECT"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("UNIONRECT"); }
 void USER_UPDATEWINDOW(CPU *cpu) { (void)cpu; WIN16_LOG("UPDATEWINDOW"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("UPDATEWINDOW"); }
 void USER_VALIDATERECT(CPU *cpu) { (void)cpu; WIN16_LOG("VALIDATERECT"); cpu->ax = 0; cpu->sp += 4 + 6; }
