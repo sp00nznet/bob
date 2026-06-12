@@ -294,13 +294,34 @@ void KERNEL_LOCALINIT(CPU *cpu) {
  * InitTask is called once at the very start of a Win16 EXE (Borland C0). It
  * returns the startup register block the runtime needs; a stub returning AX=0
  * makes the startup abort. */
+/* FatalAppExit(UINT wAction, LPCSTR lpszMsg) — print the message (MSC runtime
+ * errors come through here, e.g. "R6009 - not enough space for environment")
+ * so we can see WHY the startup aborted, then purge the PASCAL args. */
+void KERNEL_FATALAPPEXIT(CPU *cpu) {
+    uint16_t off = mem_read16(cpu, cpu->ss, (uint16_t)(cpu->sp + 4));
+    uint16_t seg = mem_read16(cpu, cpu->ss, (uint16_t)(cpu->sp + 6));
+    char buf[160]; int i = 0;
+    for (; i < 159; i++) {
+        uint8_t c = mem_read8(cpu, seg, (uint16_t)(off + i));
+        if (!c) break;
+        buf[i] = (c >= 32 && c < 127) ? (char)c : '.';
+    }
+    buf[i] = 0;
+    fprintf(stderr, "[FatalAppExit] %04X:%04X \"%s\"\n", seg, off, buf);
+    cpu->ax = 0; cpu->sp += 4 + 6;
+}
+
 void KERNEL_INITTASK(CPU *cpu) {
     uint16_t hinst = CATZ_AUTO_DATA_SEG;   /* fake hInstance == WAD DGROUP sel */
     /* Empty command line in the (fake) PSP at DGROUP:0080: length byte 0, CR. */
     mem_write8(cpu, hinst, 0x80, 0);
     mem_write8(cpu, hinst, 0x81, 0x0D);
     cpu->ax = 1;                 /* success (nonzero) */
-    cpu->cx = 0xFFFE;            /* stack top */
+    /* CX = stack LIMIT (lowest offset the stack may reach), not the top. The
+     * C0 startup does `add cx,0x100; jb fail` to verify headroom, so a value
+     * near 0xFFFF carries and aborts. Put the limit above the statics/heap
+     * (DGROUP is a full 64 KB; stack grows down from sp=0xFFFE). */
+    cpu->cx = 0x4000;            /* stack limit */
     cpu->dx = 1;                 /* nCmdShow = SW_SHOWNORMAL */
     cpu->si = 0;                 /* hPrevInstance = none */
     cpu->di = hinst;             /* hInstance */

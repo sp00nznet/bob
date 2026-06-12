@@ -158,7 +158,6 @@ void GDI_UNREALIZEOBJECT(CPU *cpu) { (void)cpu; WIN16_LOG("UNREALIZEOBJECT"); cp
 void KERNEL_ADDATOM(CPU *cpu) { (void)cpu; WIN16_LOG("ADDATOM"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("ADDATOM"); }
 void KERNEL_CATCH(CPU *cpu) { (void)cpu; WIN16_LOG("CATCH"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("CATCH"); }
 void KERNEL_DOS3CALL(CPU *cpu) { (void)cpu; WIN16_LOG("DOS3CALL"); cpu->ax = 0; cpu->sp += 4 + 0; }
-void KERNEL_FATALAPPEXIT(CPU *cpu) { (void)cpu; WIN16_LOG("FATALAPPEXIT"); cpu->ax = 0; cpu->sp += 4 + 6; }
 void KERNEL_FATALEXIT(CPU *cpu) { (void)cpu; WIN16_LOG("FATALEXIT"); cpu->ax = 0; cpu->sp += 4 + 2; }
 void KERNEL_FINDATOM(CPU *cpu) { (void)cpu; WIN16_LOG("FINDATOM"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("FINDATOM"); }
 void KERNEL_FREEPROCINSTANCE(CPU *cpu) { (void)cpu; WIN16_LOG("FREEPROCINSTANCE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("FREEPROCINSTANCE"); }
