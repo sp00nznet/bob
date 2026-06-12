@@ -214,15 +214,21 @@ WinMain gets past `InitApplication` (virtual `0x3C` now hits) and calls
 startup falls to the R6021 fallback. Implemented `SetWindowsHook`/`Ex` (purge
 6/10, return non-zero HHOOK) — didn't unblock; InitInstance fails deeper.
 
-**Top lead:** with `dispatch_far` miss-tracing (`-DELFISH_TRACE_RUNTIME`), the
-engine phase is clean (5 misses) but the host phase has **273 misses dominated
-by 257× `dispatch_far MISS seg=1050 off=37F8`**, all early in host startup
-(right after LibMain). Selector `1050` (`0x41A`) is not a real segment (host is
-31–40), so an early host far-call loops through a bogus/unrelocated far pointer.
-Next: find that call site (a `call/jmp far [mem]` whose pointer reads
-`041A:37F8`) — likely an un-relocated far pointer or a Win16 selector value the
-flat model doesn't map — and resolve it; it may well be what makes InitInstance
-report failure.
+**Localized lead (hardcoded far pointer `0x41A:0x37F8`):** with `dispatch_far`
+miss-tracing (`-DELFISH_TRACE_RUNTIME`) the engine phase is clean (5 misses) but
+the host phase has **273 misses, 257 of them to `seg=0x41A off=0x37F8`**. Source:
+`seg037_046D/046F` (a *real* IDA function) does
+`push 0x41A; push 0x37F8; call seg035_06D0` — `seg035_06D0` is a generic
+"call far-proc `di` times" helper (`di=0x101=257`, `si=0x1C2C` stride `8`). So
+real host code holds a **hardcoded far pointer `0x41A:0x37F8`** with *no
+relocation* — `0x41A` is not one of our flat selectors (host = 31–40), so the
+257 `call far` iterations all miss and the loop is a no-op, leaving 257×8-byte
+records at `0x1C2C` unprocessed. Open question: what is selector `0x41A`? It
+looks like a real Win16 LDT selector value baked into the image (index≈131,
+RPL/TI bits) that the flat model doesn't map — needs IDA's view of
+`seg037:0x046F` to see whether IDA resolves it to a known segment/thunk, then a
+runtime mapping (or a fix-up) for it. The loop is benign (completes) but its
+skipped work may be why InitInstance ends up reporting failure.
 
 ## Already fixed this milestone
 
