@@ -242,11 +242,28 @@ Unicorn). The real host code executes correctly from `seg35:0002` and stops
 exactly at the **first Win16 import call** (`KERNEL_INITTASK`) — proving the hard
 part (Win16 protected-mode addressing in Unicorn) works.
 
-Next phase — **import interception**: reserve a trap GDT selector; patch every
-import fixup (chained, all 3 modules) to `trap_sel:import_idx`; a code hook
-catches `CS==trap_sel`, runs a Python shim oracle (mirrors `runtime/win16` return
-values + the `win16.py` PURGE table), and far-returns (pop frame + purge). Then
-trace function entries (IDA-named) → `work/uni_trace.log` and diff vs the recomp.
+Import interception (DONE): a trap GDT selector + every import fixup (chained,
+all 3 modules) patched to `trap_sel:idx`; a code hook catches `CS==trap_seg`,
+runs a shim oracle that **auto-mirrors the recomp's one-line `win16_impl.c` shims**
+(regex) plus hand-written stateful ones (InitTask, RegisterClass, the
+`__WINFLAGS`=WF_PMODE / `__AHINCR`/`__AHSHIFT` OFFSET16 constants), then
+far-returns with the right purge. INT 21h is hooked too. Function entries are
+traced using the recomp's OWN `segments.h` (identical granularity) →
+`work/uni_trace.log`.
+
+**Result — the recomp's host startup is VALIDATED faithful for the first 20
+functions:** `uni_trace.log` matches the recomp's host trace exactly through
+`seg035_0002 → 0010 → … → 012E`. Two divergences found along the way were both
+**harness shim-fidelity gaps, not recomp bugs**: (1) `__WINFLAGS` needed WF_PMODE
+set (real-vs-protected-mode `test cs:[0],1`); (2) `USER_INITAPP` had to return 1
+(now auto-mirrored). After those, the first real divergence is **`WIN87EM.__FPMATH`**
+— the original uses the x87 FP-emulator (far-calls to WIN87EM) while the recomp
+lifts FP to native x87, a **known structural difference**, not a bug; the uni
+stalls there (WIN87EM's calling convention isn't a normal far-call).
+
+Next: teach the harness WIN87EM (execute the equivalent x87 op on `__FPMATH`/
+the FP entries, or no-op past them) so the diff can continue past FP code to
+where the recomp actually creates — or fails to create — the main window.
 
 ### Resource subsystem wired for Bob; frontier refined to "no main window"
 
