@@ -256,14 +256,42 @@ functions:** `uni_trace.log` matches the recomp's host trace exactly through
 `seg035_0002 → 0010 → … → 012E`. Two divergences found along the way were both
 **harness shim-fidelity gaps, not recomp bugs**: (1) `__WINFLAGS` needed WF_PMODE
 set (real-vs-protected-mode `test cs:[0],1`); (2) `USER_INITAPP` had to return 1
-(now auto-mirrored). After those, the first real divergence is **`WIN87EM.__FPMATH`**
-— the original uses the x87 FP-emulator (far-calls to WIN87EM) while the recomp
-lifts FP to native x87, a **known structural difference**, not a bug; the uni
-stalls there (WIN87EM's calling convention isn't a normal far-call).
+(now auto-mirrored). After those, instruction-level tracing (`--itrace --itfrom N`) showed the real
+stall is **not** WIN87EM (the `__FPMATH` init far-calls returned fine). It is a
+**selector fault** at `seg035_012E → 0139`:
 
-Next: teach the harness WIN87EM (execute the equivalent x87 op on `__FPMATH`/
-the FP entries, or no-op past them) so the diff can continue past FP code to
-where the recomp actually creates — or fails to create — the main window.
+```
+012E: mov es, [ds:0xF8B]   ; es = stored instance selector (seg40)
+0132: mov cx, es:[0x2C]    ; cx = a selector from instance data at seg40:0x2C
+0137: jcxz 0177            ; (skip if zero)
+0139: mov es, cx           ; <- cx = 0x256F : NOT a valid GDT selector -> #GP
+```
+
+`seg40:0x2C` holds `0x256F` — static garbage read **as a selector**. In real
+Win16 this field is part of the **loader-initialised instance/task data** and
+would hold a valid selector (or 0, which `jcxz` skips). Our model never sets it,
+so it reads the raw DGROUP bytes. Real hardware (the uni) rejects the bad
+selector; the **recomp's lax selector model silently loads es=0x256F (→ the
+guard region) and continues** — i.e. the recomp operates on garbage instance
+data from here on, a strong candidate for why it never creates the main window.
+
+Tried (b) — make the harness tolerate any selector via a **full 8192-entry GDT**
+(real segments at their index, everything else → a guard descriptor). It loads
+ordinary unknown selectors, but Unicorn still **#GP-faults on `mov es, 0x256F`**:
+the garbage value has RPL=3, and Unicorn rejects RPL=3 into a CPL=0 segreg even
+with a DPL=3 guard descriptor (a stricter-than-textbook Unicorn quirk; CPL=3
+isn't reachable without a TSS). So the harness can't paper over this particular
+load.
+
+That actually **sharpens the conclusion**: `seg40:0x2C` is genuinely supposed to
+be loader-initialised instance data (a valid selector or 0), and `0x256F` is
+static DGROUP bytes the program never should read as a selector here. The recomp
+only "gets past" it by not validating selectors (es := 0x256F → guard), then
+runs ~4,300 more calls on garbage instance data — which is very plausibly why it
+never creates a window. **Next: initialise the Win16 instance/task data** (find
+what writes `seg40:0x2C` / the DGROUP instance header during a real
+InitTask/loader, and reproduce it in the recomp's runtime). The harness
+(`uni_host.py`, `--itrace --itfrom N`) is the oracle to verify each field.
 
 ### Resource subsystem wired for Bob; frontier refined to "no main window"
 
