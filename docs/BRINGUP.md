@@ -206,6 +206,24 @@ calls — the promoted ctors/vtable methods now run), and the host advances from
 251 → ~1193 calls, running real MFC `InitInstance` (`LoadString`,
 `GetModuleHandle`, `SetWindowsHookEx`, …).
 
+### Two more lifter fixes — host now runs deep MFC InitInstance (4,340 calls)
+
+- **`push imm16` SELECTOR fixup** (`ne_lift.py`): the relocated-immediate
+  resolver handled only `mov reg,imm`, not `push imm16`. Win16 passes a far
+  pointer as `push seg X; push offset Y; call`; the segment push carries a
+  SELECTOR(2) fixup, so without resolving it the raw placeholder selector
+  (`0x41A`) was pushed and the later `call far [arg]` hit a bogus segment. Now
+  `push seg X` → `push16(cpu, SEG_X)`. (IDA confirmed `0x41A` = `seg cseg06`.)
+- **Inline `push seg/offset` code-pointer promotion** (`lift_combined.py`): the
+  paired offset (`push offset Y`) is a final literal with no relocation, so
+  `seg036:0x37F8` was a code label IDA never made a function. New
+  `scan_pushed_code_farptrs` detects `push seg(code); push imm16` and promotes
+  `(X, Y)` (IDA code-heads only). +185/58/104 entries across the modules.
+
+Result: the 257× `seg=36:37F8` miss is gone, host-phase dispatch misses drop to
+a handful, and the host runs **4,340 calls** of MFC `InitInstance` (was ~1,193).
+Engine stays correct (`ax=0001`, 724 calls).
+
 ### Current frontier: MFC InitInstance returns FALSE
 
 WinMain gets past `InitApplication` (virtual `0x3C` now hits) and calls
