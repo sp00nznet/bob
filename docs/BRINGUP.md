@@ -151,15 +151,34 @@ infinite re-init. InitTask must return `CX = stack *limit*` (a low offset); set
 to `0x4000` (above the host statics, below the stack). The host now runs to
 WinMain instead of looping.
 
-**Current frontier: "no main procedure".** The host now aborts via
-`FatalAppExit` with the MSC/MFC message **`no main procedure`** (captured by a
-real `KERNEL_FATALAPPEXIT` shim that prints `ds:ax`). This is MFC's
-`AfxWinMain` failing to find the `CWinApp` application object: the host's C++
-static-constructor walk (`seg035_022D`, same shape as the engine's) isn't
-constructing/registering the app object — its ctor-table bounds (`si`/`di`)
-look empty (`022D → 023F` immediately). Next: verify the host ctor-table bounds
-in its DGROUP are set (relocated/initialized), so the `CWinApp` constructor runs
-and registers into the module state `AfxWinMain` reads.
+**Current frontier: "no main procedure".** The host aborts via `FatalAppExit`
+with the message **`no main procedure`** (captured by a real
+`KERNEL_FATALAPPEXIT` shim that prints `ds:ax`). Investigation:
+
+- The abort goes through `seg035_10E2 → 1103 → 1113`, which is the MSC C-runtime
+  **`_amsg_exit` error reporter**: `seg035_1128` searches the error-message
+  table at host DGROUP `0x1540` (`R6025 - pure virtual function call`,
+  `R6009 - not enough space for environment`, …) for a code. So "no main
+  procedure" is the *message being reported*, not the root check — an earlier
+  step decided to abort and routed here.
+
+- **Dead end tried:** the host's C++ ctor targets (`seg036_409F`, `seg031_2D7E`,
+  …) are reached only via far-pointer TABLES in the host DGROUP (`{offset,
+  selector}` pairs patched through SELECTOR **relocation chains**). IDA never
+  makes them functions, so the lifter didn't either, so the ctor `dispatch_far`
+  calls miss. I added far-pointer-table → function promotion to
+  `lift_combined.py` (walks the reloc chains, only promotes IDA code-heads) —
+  it correctly creates `seg036_409F` etc. **But** promoting the *engine's* ctor
+  entries regressed engine init (24,680 → 229 calls: ctors that were safely
+  skipped now run and break it), and promoting the host's didn't clear
+  "no main procedure". Reverted (stashed). The promotion idea is sound but needs
+  to be (a) host-only and (b) paired with finding the *actual* failing check.
+
+- Next: find what loads the `0x1671` message offset / decides to abort *before*
+  `seg035_10E2` — trace the host with `-DCATZ_TRACE_FN` and walk back from the
+  first entry into the `_amsg_exit` reporter. Likely a specific runtime/MFC
+  precondition (argv/env, a required export, or the app object) the host setup
+  doesn't satisfy yet.
 
 ## Already fixed this milestone
 
