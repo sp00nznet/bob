@@ -106,9 +106,11 @@ Two fixes unlocked this (see **[docs/BRINGUP.md](docs/BRINGUP.md)**):
    and LibMain runs with `SS=DS=`engine DGROUP. This took init from stalling at
    93 calls to completing at 24,680.
 
-**Current frontier:** the **UTOPIAWA host** startup (`seg035`, its own MFC
-C-runtime/module-state init) loops and then derails — the same class of bringup
-work, now on the host module.
+**Current frontier:** the **UTOPIAWA host** now runs past its `InitTask` re-init
+loop (fixed: InitTask returns the stack *limit* in CX, not the top) into WinMain,
+and aborts via `FatalAppExit` with the MFC message **"no main procedure"** —
+`AfxWinMain` can't find the `CWinApp` object because the host's C++ ctor walk
+isn't constructing it yet. See [docs/BRINGUP.md](docs/BRINGUP.md).
 
 ### How it lifts (the three modules → one program)
 

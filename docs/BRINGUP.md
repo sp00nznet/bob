@@ -139,16 +139,27 @@ MFC class registration that converges. Along the way it does real Win16 work:
 The 64 KB-DGROUP + small-model `SS=DS` change was the decisive fix: it took init
 from frozen-at-93-calls to completing at 24,680.
 
-## Next frontier — the UTOPIAWA host startup
+## UTOPIAWA host startup — progress + current frontier
 
 After LibMain returns, `main.c` runs the host entry `seg035_0002` (UTOPIAWA's
-Borland C0 → WinMain). It enters the host's **own** MFC C-runtime/module-state
-init (`seg035_0002 → 0010 → 0014 → 0018 → 10C8 → 1151 …`, looping through
-`seg035_022D/023F`) and then derails into a garbage call (`FN ` with a null
-name) — the same class of work as the engine, now on the host module. The host
-already runs small-model (`SS=DS=`host DGROUP 40, 64 KB). Likely the host needs
-the same kind of per-module fix-ups; trace `seg035` startup the same way
-(`-DCATZ_TRACE_FN`, `-DBOB_WATCHDOG`).
+C0 → WinMain).
+
+**Fixed: the InitTask re-init loop.** `seg035_0002` calls `KERNEL_INITTASK`,
+then `add cx,0x100; jb fail`. Our stub returned `CX=0xFFFE` (stack *top*), which
+carries → `jb` taken → `10C8` calls `1151` and **jmps back to `0002`** =
+infinite re-init. InitTask must return `CX = stack *limit*` (a low offset); set
+to `0x4000` (above the host statics, below the stack). The host now runs to
+WinMain instead of looping.
+
+**Current frontier: "no main procedure".** The host now aborts via
+`FatalAppExit` with the MSC/MFC message **`no main procedure`** (captured by a
+real `KERNEL_FATALAPPEXIT` shim that prints `ds:ax`). This is MFC's
+`AfxWinMain` failing to find the `CWinApp` application object: the host's C++
+static-constructor walk (`seg035_022D`, same shape as the engine's) isn't
+constructing/registering the app object — its ctor-table bounds (`si`/`di`)
+look empty (`022D → 023F` immediately). Next: verify the host ctor-table bounds
+in its DGROUP are set (relocated/initialized), so the `CWinApp` constructor runs
+and registers into the module state `AfxWinMain` reads.
 
 ## Already fixed this milestone
 
