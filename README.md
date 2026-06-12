@@ -93,10 +93,12 @@ Microsoft Bob Recomp - starting
         ... stalls in the C++ ctor-table walk (seg005_38E4)
 ```
 
-The stall is the expected bringup signal: the constructor-table walk needs the
-CRT startup chain (`seg002_0000` → …) and its data-relocated table bounds to be
-exactly right. That — plus implementing the Win16 shims each ctor reaches — is
-the next grind. See the roadmap below.
+The stall is now traced precisely to **MFC's 16-bit module-state init** — a
+continuation-pointer state machine over DGROUP cells (`ds:[0x9446]` handler,
+`ds:[0x7E54]` state ptr, `ss:[0x20]`) that must be populated in order during
+init. It calls no Win16 shims; it's pure lifted computation that isn't
+converging. Full trace, the exact mechanism, and a prioritized next-step
+checklist are in **[docs/BRINGUP.md](docs/BRINGUP.md)**.
 
 ### How it lifts (the three modules → one program)
 
