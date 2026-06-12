@@ -174,11 +174,33 @@ with the message **`no main procedure`** (captured by a real
   "no main procedure". Reverted (stashed). The promotion idea is sound but needs
   to be (a) host-only and (b) paired with finding the *actual* failing check.
 
-- Next: find what loads the `0x1671` message offset / decides to abort *before*
-  `seg035_10E2` — trace the host with `-DCATZ_TRACE_FN` and walk back from the
-  first entry into the `_amsg_exit` reporter. Likely a specific runtime/MFC
-  precondition (argv/env, a required export, or the app object) the host setup
-  doesn't satisfy yet.
+### RESOLVED root cause: SELECTOR-fixup far calls went to offset 0
+
+Back-tracing the abort: error code `0x15` = `R6021 - no main procedure` (the
+table at `0x1540` is the MSC error list). The host startup calls WinMain via
+`seg035_070A: call far FFFF:1C2A`, then falls through to the R6021 fallback if
+that returns without terminating. But the lifted call was `seg032_0000(cpu)` —
+**a stub at offset 0**, not `seg032_1C2A` (the real WinMain). Cause: the far
+call's selector word carries a **SELECTOR(2)** relocation (`tseg=2, toff=0`);
+the *offset* (`0x1C2A`) is the instruction's own immediate. `ne_lift.py`'s
+`_resolve_far_call` used `r.target_off` (0 for selector fixups) → every such
+call went to `segNNN_0000`. Fixed: for `src_type==2` FAR calls, take the offset
+from `inst.op1.disp`.
+
+Impact: this silently no-op'd cross-segment far calls program-wide. With it
+fixed, the host calls the real WinMain and the **engine LibMain is now correct**
+(~100 calls → `ax=0001` success). The old "24,680-call" LibMain was the *buggy*
+wandering path created by skipped calls. Also needed: `RegisterClass` must
+return a non-zero atom (0 = failure made the engine abort init).
+
+### Current frontier: WinMain exits early
+
+WinMain (`seg032_1C2A`) now runs (~27 calls: `SetWindowsHook`, …) then returns
+early — almost certainly a Win16 stub returning a failure value (the same shape
+as the RegisterClass issue), so the C0 startup's exit path falls through to the
+R6021 fallback. Next: trace `seg032` to the failing stub/check, give it a
+success return, and make the process-exit path actually terminate rather than
+return into the R6021 fallback.
 
 ## Already fixed this milestone
 
