@@ -193,14 +193,26 @@ fixed, the host calls the real WinMain and the **engine LibMain is now correct**
 wandering path created by skipped calls. Also needed: `RegisterClass` must
 return a non-zero atom (0 = failure made the engine abort init).
 
-### Current frontier: WinMain exits early
+### Far-pointer-table promotion is now safe (was a dead end pre-far-call-fix)
 
-WinMain (`seg032_1C2A`) now runs (~27 calls: `SetWindowsHook`, …) then returns
-early — almost certainly a Win16 stub returning a failure value (the same shape
-as the RegisterClass issue), so the C0 startup's exit path falls through to the
-R6021 fallback. Next: trace `seg032` to the failing stub/check, give it a
-success return, and make the process-exit path actually terminate rather than
-return into the R6021 fallback.
+WinMain dispatches MFC `CWinApp` virtuals via vtables (`call far es:[di+0x3C]`).
+Those vtable slots — like the C++ ctor tables — are data far-pointers whose
+targets IDA never makes functions, so the dispatch missed and `InitInstance`
+"returned" 0 → WinMain bailed. The earlier far-pointer-table → function
+promotion in `lift_combined.py` (walk SELECTOR reloc chains, promote only IDA
+code-heads) regressed the engine *before* the far-call fix. **With the far-call
+fix in place it is now safe**: engine LibMain stays correct (`ax=0001`, ~714
+calls — the promoted ctors/vtable methods now run), and the host advances from
+251 → ~1193 calls, running real MFC `InitInstance` (`LoadString`,
+`GetModuleHandle`, `SetWindowsHookEx`, …).
+
+### Current frontier: MFC InitInstance
+
+The host now runs MFC `CWinApp::InitInstance` and still exits before creating a
+window (no `CreateWindow` yet) → R6021 fallback. Next: trace `seg032` through
+InitInstance to the stub returning failure (`LoadString`/`SetWindowsHookEx`
+purge+return, or a resource the stub returns empty for), and make the
+process-exit path terminate rather than fall through to R6021.
 
 ## Already fixed this milestone
 
