@@ -7,7 +7,7 @@
 #include <string.h>
 
 #ifndef CATZ_GAME_DIR
-#define CATZ_GAME_DIR "game"
+#define CATZ_GAME_DIR "game/install"
 #endif
 
 typedef struct {
@@ -113,10 +113,13 @@ static int parse_ne(Mod *m) {
 
 static Mod *register_mod(const char *base, uint16_t hinst) {
     char path[512];
-    snprintf(path, sizeof path, "%s/%s.DLL", CATZ_GAME_DIR, base);
-    FILE *f = fopen(path, "rb");
-    if (!f) {   /* WAD has no .DLL extension */
-        snprintf(path, sizeof path, "%s/%s.WAD", CATZ_GAME_DIR, base);
+    /* Bob's NE files: UTOPIA.DLL / UEXTRA.DLL sit directly in the install dir;
+     * the host UTOPIAWA.EXE lives in its own subdir. Try the common layouts. */
+    const char *fmts[] = { "%s/%s.DLL", "%s/%s.EXE", "%s/%s/%s.EXE", "%s/%s.WAD" };
+    FILE *f = NULL;
+    for (int i = 0; i < 4 && !f; i++) {
+        if (i == 2) snprintf(path, sizeof path, fmts[i], CATZ_GAME_DIR, base, base);
+        else        snprintf(path, sizeof path, fmts[i], CATZ_GAME_DIR, base);
         f = fopen(path, "rb");
     }
     if (!f) { fprintf(stderr, "[ne] cannot open %s\n", base); return NULL; }
@@ -164,10 +167,12 @@ static int tag_to_type(const char *tag, int id) {
 void ne_init(void) {
     if (g_inited) return;
     g_inited = 1;
-    Mod *dll = register_mod("CATZDLL", 59);   /* hinst == CATZDLL DGROUP selector */
-    register_mod("CATZ", 66);                 /* CATZ.WAD; hinst == WAD DGROUP selector */
-    if (dll) scan_tagmap(dll);
-    fprintf(stderr, "[ne] tag map: %d (tag,id)->type records\n", g_ntag);
+    /* hinst == each module's DGROUP selector in the combined image (mem_layout):
+     * UTOPIA engine = 24, UEXTRA = 27, UTOPIAWA host = 40. The lifted code calls
+     * LoadString/LoadResource with these as the module handle. */
+    register_mod("UTOPIA", 24);
+    register_mod("UEXTRA", 27);
+    register_mod("UTOPIAWA", 40);
 }
 
 static Mod *mod_by_hinst(uint16_t hinst) {

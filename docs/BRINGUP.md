@@ -224,7 +224,33 @@ Result: the 257× `seg=36:37F8` miss is gone, host-phase dispatch misses drop to
 a handful, and the host runs **4,340 calls** of MFC `InitInstance` (was ~1,193).
 Engine stays correct (`ax=0001`, 724 calls).
 
-### Current frontier: MFC InitInstance returns FALSE
+### Resource subsystem wired for Bob; frontier refined to "no main window"
+
+`runtime/win16/ne_resources.c` now loads Bob's NE files (was catz's CATZDLL/CATZ):
+`register_mod("UTOPIA",24) / ("UEXTRA",27) / ("UTOPIAWA",40)`, the game dir is
+`game/install`, and `register_mod` tries `.DLL/.EXE/<base>/<base>.EXE/.WAD`
+(the host lives in a subdir). Resources now load (UTOPIA 450, UEXTRA 1,
+UTOPIAWA 197) so `LoadString`/`LoadResource` are backed by the real tables.
+
+Refined diagnosis (the earlier "InitInstance returns FALSE" was imprecise):
+`seg032_1C6A` dispatches the `CWinApp` vtable — `0x3C` (InitApplication/
+InitInstance) returns non-zero, then `0x40` runs and the path ends at
+`seg032_39C6` which sets **`ax=1` (success)**. So WinMain's init *succeeds* — but
+**no `CreateWindow` is ever called** (none in the win16 trace) and **no message
+loop runs** (no `GetMessage`/`PeekMessage`). With no main window, MFC `Run`
+returns immediately, WinMain returns, and the C0 startup falls to the R6021
+"no main procedure" fallback (which is just the post-WinMain "shouldn't reach
+here unless exit didn't terminate" path).
+
+`LoadString(40, 57344=0xE000)` still returns "" even with resources loaded —
+that ID isn't in UTOPIAWA's table (host call count is unchanged at 4,340, so it
+isn't gating control flow). Next: instrument the vtable dispatch to pin down
+which slot is InitInstance vs Run, and find why InitInstance returns success
+without creating the main window (a guarded early-return, or a window-creation
+API/resource the stubs don't satisfy). Also: make the process-exit path
+terminate so a returning WinMain doesn't hit the R6021 fallback.
+
+### (earlier note) Current frontier: MFC InitInstance returns FALSE
 
 WinMain gets past `InitApplication` (virtual `0x3C` now hits) and calls
 `InitInstance` (virtual `0x40`), which returns FALSE → straight to teardown
