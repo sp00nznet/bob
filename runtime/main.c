@@ -24,6 +24,8 @@
 #define CATZ_IMAGE_PATH "build_data/mem_image.bin"
 #endif
 
+extern CPU *g_cpu;   /* defined below; referenced by the watchdog */
+
 #ifdef BOB_WATCHDOG
 #include <windows.h>
 /* If lifted code spins, dump the recent call ring (the histogram's top names
@@ -31,7 +33,17 @@
 static DWORD WINAPI watchdog_thread(LPVOID p) {
     (void)p;
     Sleep(4000);
-    fprintf(stderr, "\n[watchdog] 4s elapsed - lifted code still running:\n");
+    fprintf(stderr, "\n[watchdog] 4s elapsed - lifted code still running.\n");
+    fprintf(stderr, "--- last 30 calls in order (most recent last) ---\n");
+    for (int i = 30; i >= 1; i--) {
+        const char *nm = g_fn_ring[(g_fn_ring_pos - (unsigned)i) & (CATZ_FN_RING_SIZE - 1)];
+        if (nm) fprintf(stderr, "  %s\n", nm);
+    }
+    if (g_cpu)
+        fprintf(stderr, "regs: ax=%04X bx=%04X cx=%04X dx=%04X si=%04X di=%04X "
+                "bp=%04X sp=%04X ds=%04X es=%04X ss=%04X cs=%04X\n",
+                g_cpu->ax, g_cpu->bx, g_cpu->cx, g_cpu->dx, g_cpu->si, g_cpu->di,
+                g_cpu->bp, g_cpu->sp, g_cpu->ds, g_cpu->es, g_cpu->ss, g_cpu->cs);
     dump_fn_ring(0);
     fflush(stderr);
     _exit(99);
