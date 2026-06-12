@@ -57,10 +57,20 @@ class NELifter(Lifter):
                 if target_type == 0:  # Internal
                     if r.target_seg > 0 and r.target_seg != 0xFF:
                         target = self.seg_by_index.get(r.target_seg)
-                        if target is not None and target.is_code:
-                            return f'seg{r.target_seg:03d}_{r.target_off:04X}'
+                        # A SELECTOR(2) fixup patches ONLY the segment word; the
+                        # call's offset is the instruction's own far immediate
+                        # (`call far SEG:off`). Using r.target_off there (which is
+                        # 0 for selector fixups) sends every such call to off 0 --
+                        # e.g. the host's `call WinMain` became seg032_0000 (a
+                        # stub) instead of seg032_1C2A, so WinMain never ran.
+                        if r.src_type == 2 and inst.op1 and inst.op1.type == OpType.FAR:
+                            off = inst.op1.disp & 0xFFFF
                         else:
-                            return f'/* data ref seg{r.target_seg}:{r.target_off:04X} */'
+                            off = r.target_off & 0xFFFF
+                        if target is not None and target.is_code:
+                            return f'seg{r.target_seg:03d}_{off:04X}'
+                        else:
+                            return f'/* data ref seg{r.target_seg}:{off:04X} */'
                 elif target_type in (1, 2):  # Import by ordinal / by name
                     mod = module_name(self.ne, r.module_idx)
                     # Cross-module call into another lifted module (e.g. CATZDLL):

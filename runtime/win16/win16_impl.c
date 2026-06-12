@@ -426,7 +426,15 @@ static void write_rect(CPU *cpu, uint16_t seg, uint16_t off, int l, int t, int r
     mem_write16(cpu, seg, (uint16_t)(off + 6), (uint16_t)b);
 }
 
-/* USER_REGISTERCLASS, USER_CREATEWINDOW: real Win32 in win32_backend.c */
+/* RegisterClass returns a non-zero ATOM on success (0 = failure). The stub
+ * returned 0, so the engine/host treated every class registration as failed and
+ * aborted init. Hand back a unique non-zero atom per call. */
+void USER_REGISTERCLASS(CPU *cpu) {
+    static uint16_t atom = 0xC001;
+    cpu->ax = atom++;
+    if (atom == 0) atom = 0xC001;
+    ret(cpu, 4);
+}
 void USER_GETSYSTEMMENU(CPU *cpu)  { cpu->ax = FAKE_HANDLE; ret(cpu, 4); }
 void USER_APPENDMENU(CPU *cpu)     { cpu->ax = 1; ret(cpu, 10); }
 void USER_LOADICON(CPU *cpu)       { cpu->ax = FAKE_HANDLE; ret(cpu, 6); }

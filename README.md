@@ -77,40 +77,42 @@ your own OEM/retail disc, then extract:
 7z x game/iso/U1.CAB -ogame/install   # UTOPIA.DLL, UTOPIAWA.EXE, ACTORS\*.ACT, ...
 ```
 
-## Status: Bringup — UTOPIA engine init runs to completion ✅
+## Status: Bringup — engine init correct; host runs WinMain ✅
 
-All three modules lift to link-clean C **and the recompiled engine fully
-initializes.** `bob.exe` loads the combined flat image, sets up selectors, and
-runs `UTOPIA` LibMain through **24,680 lifted calls to a clean return** —
-including real Win16 work (`GlobalAlloc`, `RegisterWindowMessage`,
-`DeferWindowPos`, …) and MFC's full module-state + C++ class registration.
+All three modules lift to link-clean C, the recompiled **engine LibMain
+initializes cleanly**, and the **host reaches and runs WinMain**.
 
 ```
-Microsoft Bob Recomp - starting
-  image: build_data/mem_image.bin (1.30 MB)
-  engine entry: seg5:120D (UTOPIA LibMain), engine-data seg24
-  host entry:   seg35:0002 (UTOPIAWA), host-data seg40, stack seg40
-[win16] GlobalAlloc(flags=2002, 4096) -> 4000      <- real engine init
-[win16] REGISTERWINDOWMESSAGE / DEFERWINDOWPOS ...
-UTOPIA LibMain returned (ax=0100) after 24680 lifted calls   ✅ engine init done
+engine entry: seg5:120D (UTOPIA LibMain)   host entry: seg35:0002 (UTOPIAWA)
+[win16] GlobalAlloc(2002,4096) -> 4000 ; RegisterClass ; ...
+UTOPIA LibMain returned (ax=0001) after 100 lifted calls   ✅ engine init OK
+... host C0 startup -> WinMain (seg032_1C2A) runs: SetWindowsHook, ...
 ```
 
-Two fixes unlocked this (see **[docs/BRINGUP.md](docs/BRINGUP.md)**):
-1. **NE seg 1 is data, not code** — IDA found zero instructions in it (it's a
-   far-pointer dispatch table); the lifter was linear-sweeping it into 34 KB of
-   garbage functions that execution derailed into. `lift_combined.py` now skips
-   any "code" segment with no IDA heads (kept as data in the image).
-2. **64 KB DGROUP + small-model SS=DS** — the engine C-runtime accesses globals
-   via `ss:[abs]` assuming `SS==DS==DGROUP`. `gen_image_bob.py` now allocates
-   DGROUP/stack segments a full 64 KB (statics at the bottom, stack at the top),
-   and LibMain runs with `SS=DS=`engine DGROUP. This took init from stalling at
-   93 calls to completing at 24,680.
+The fixes that got here (see **[docs/BRINGUP.md](docs/BRINGUP.md)**):
+1. **NE seg 1 is data, not code** — IDA found zero instructions in it (a
+   far-pointer dispatch table); the lifter was linear-sweeping it into garbage.
+   `lift_combined.py` skips "code" segments with no IDA heads (kept as data).
+2. **64 KB DGROUP + small-model SS=DS** — the C-runtime accesses globals via
+   `ss:[abs]` assuming `SS==DS==DGROUP`; `gen_image_bob.py` allocates DGROUP/
+   stack a full 64 KB and the engine runs `SS=DS=`engine DGROUP.
+3. **Far-call SELECTOR-fixup offset bug (major)** — a `call far SEG:off` whose
+   selector carries a SELECTOR(2) relocation kept its offset in the instruction
+   immediate, but the lifter used the relocation's `target_off` (0 for selector
+   fixups), sending **every such call to offset 0** (a stub). This silently
+   no-op'd cross-segment calls — incl. the host's `call WinMain` (→ `seg032_0000`
+   stub instead of `seg032_1C2A`). Fixed in `ne_lift.py`. This also revealed the
+   old "24,680-call" LibMain was the *buggy* wandering path; the correct lean
+   LibMain is ~100 calls returning success.
+4. **Stub return values / purges** — `RegisterClass` now returns a non-zero atom
+   (0 = failure aborted init); `InitTask` returns the stack *limit* in CX (not
+   the top, which infinite-looped); purges for `SetWindowsHook`/etc.
 
-**Current frontier:** the **UTOPIAWA host** now runs past its `InitTask` re-init
-loop (fixed: InitTask returns the stack *limit* in CX, not the top) into WinMain,
-and aborts via `FatalAppExit` with the MFC message **"no main procedure"** —
-`AfxWinMain` can't find the `CWinApp` object because the host's C++ ctor walk
-isn't constructing it yet. See [docs/BRINGUP.md](docs/BRINGUP.md).
+**Current frontier:** the host's **WinMain runs ~27 calls then exits early**
+(a stub returning failure, like RegisterClass did for the engine), so the C0
+startup falls through to the R6021 "no main procedure" fallback. Next: follow
+WinMain (`seg032_1C2A`) to the stub/check that makes it bail, and make the
+process-exit path terminate instead of returning. See docs/BRINGUP.md.
 
 ### How it lifts (the three modules → one program)
 

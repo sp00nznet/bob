@@ -107,6 +107,8 @@ PURGE = {
     ('KERNEL', 'GETDOSENVIRONMENT'): 0, ('KERNEL', 'GETPROCADDRESS'): 6,
     ('KERNEL', 'FATALEXIT'): 2, ('KERNEL', 'FATALAPPEXIT'): 6,
     ('USER', 'REGISTERWINDOWMESSAGE'): 4, ('USER', 'WSPRINTF'): 0,  # wsprintf is cdecl/varargs
+    ('USER', 'SETWINDOWSHOOK'): 6, ('USER', 'UNHOOKWINDOWSHOOK'): 4,
+    ('USER', 'CALLNEXTHOOKEX'): 0, ('USER', 'DEFHOOKPROC'): 0,  # varargs-ish/HHOOK handling
     ('USER', 'GETSYSTEMMETRICS'): 2, ('USER', 'GETKEYBOARDTYPE'): 2,
     # ---- USER ----
     ('USER', 'INITAPP'): 2, ('USER', 'SETMESSAGEQUEUE'): 2,
