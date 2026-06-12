@@ -224,6 +224,30 @@ Result: the 257× `seg=36:37F8` miss is gone, host-phase dispatch misses drop to
 a handful, and the host runs **4,340 calls** of MFC `InitInstance` (was ~1,193).
 Engine stays correct (`ax=0001`, 724 calls).
 
+### Differential harness (Unicorn) — foundation working
+
+`tools/uni_host.py` runs the **original** Bob host bytes under Unicorn as a
+ground-truth oracle to diff against the recomp. The plan: same flat image + same
+Win16 shim return values, trace function entries, and `diff` against the recomp's
+`TRACE_FN` trace — the first divergence is either a lifting bug (recomp differs
+from real instruction semantics) or, if both behave identically, a shim/resource
+gap. For "no main window" specifically: if the original bytes (same shims) also
+make no window, a shim returns the wrong value; if they do, the recomp mis-lifts.
+
+Foundation (done + validated): builds the same combined image as `gen_image_bob`
+but writes SELECTOR fixups as **GDT selectors (`n<<3`)** and installs a GDT whose
+descriptor `n` has `base=flat_base[n]`. Unicorn runs in `UC_MODE_32` protected
+mode with 16-bit (D=0) descriptors + `CR0.PE`; `emu_start(ip)` (CS base added by
+Unicorn). The real host code executes correctly from `seg35:0002` and stops
+exactly at the **first Win16 import call** (`KERNEL_INITTASK`) — proving the hard
+part (Win16 protected-mode addressing in Unicorn) works.
+
+Next phase — **import interception**: reserve a trap GDT selector; patch every
+import fixup (chained, all 3 modules) to `trap_sel:import_idx`; a code hook
+catches `CS==trap_sel`, runs a Python shim oracle (mirrors `runtime/win16` return
+values + the `win16.py` PURGE table), and far-returns (pop frame + purge). Then
+trace function entries (IDA-named) → `work/uni_trace.log` and diff vs the recomp.
+
 ### Resource subsystem wired for Bob; frontier refined to "no main window"
 
 `runtime/win16/ne_resources.c` now loads Bob's NE files (was catz's CATZDLL/CATZ):
