@@ -611,6 +611,11 @@ def lift_segment(ne: NEHeader, seg_num: int, func_offset: int = -1, xmod=None):
     # Lift each function
     lifter = NELifter(ne, seg)
     lifter.xmod = xmod or {}
+    # Enable indirect call/jmp dispatch: `call di` / `jmp bx` etc. resolve to
+    # recomp_dispatch(cs, reg) instead of being dropped as a no-op comment.
+    # Without this the recomp silently skips register-indirect calls (found via
+    # the uni harness: seg035_028B's `call di` -> seg035_0BD5 was never made).
+    lifter.dispatch = True
     # Function entry offsets in this segment, for near-jmp-to-another-function.
     lifter.seg_func_offsets = {f.offset for f in functions}
 
