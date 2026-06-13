@@ -292,16 +292,33 @@ recomp tolerates it (garbage selector → guard zeros → empty env → continue
 `0x2C` at a zeroed env (`ENV_SEL` → guard, via the full GDT) in `uni_host.py`
 lets the uni load it as "empty env", matching the recomp.
 
-**With that, the harness runs 2,681 instructions and the uni trace matches the
-recomp for 26 functions** (`seg035_0002 … 06F2`), then diverges in the **C++
-static-constructor walk** (`seg035_022D/023F`): the recomp exits the walk loop
-**one iteration earlier** than the original, after which their stacks differ and
-the same ctors (`seg033_19CD/19C4/127D/128C`) get called in a slightly different
-interleaving. `seg033_128C` itself is faithful (clean `retf 0x4`); the off-by-one
-is upstream in the walk loop (`cmp si,di` / the `ax=[di]|[di+2]; je` null-skip).
-**Next: instruction-diff the `seg035_022D` walk between uni and recomp to find
-the flag/iteration mismatch — likely a real lifting bug in the loop's compare or
-null test.** That, finally, is a candidate for an actual recomp defect.
+With that the diff went much deeper. Three more **harness** gaps were closed
+(all confirmed NOT recomp bugs): (1) the apparent ctor-walk "off-by-one" was a
+**trace-granularity artifact** — the harness logged the loop header on every
+real `jmp 0x022D` back-edge, while the recomp's lifted loop uses a `goto` after
+`TRACE_FN`; fixed by suppressing back-edges via per-segment function ranges; (2)
+`GlobalAlloc` must return an **even** selector backed by real memory (the recomp
+does) — added a bump allocator (even GDT selectors → fresh 64 KB regions); (3)
+the env-segment field (above). With these the **uni matches the recomp for 165
+functions over 40,158 instructions**.
+
+**Then the harness found a REAL recomp lifting bug.** At `seg035_028B` the
+original does `call di` (a register-indirect near call → `seg035_0BD5`), but the
+lifter emitted only `/* indirect call di - needs dispatch */` — **a no-op** — so
+the recomp silently *skipped* the call. Root cause: `lift16` only dispatches
+indirect call/jmp when `self.dispatch` is set, and `ne_lift` never set it. Fixed:
+`ne_lift` now sets `lifter.dispatch = True`, and the near-indirect path uses
+`dispatch_near` (cleans the pushed return word on a miss) instead of
+`recomp_dispatch`.
+
+The fix cascades correctly: `seg005_38D0` now reaches the real module-state init
+`seg002_7D82` (matching its `307C:7D82` annotation) instead of skipping it →
+`seg008_0872 → 0954`, which does `div word es:[si+0x8]` and **#DE-crashes on a
+zero divisor** (uninitialised engine data — the same uninit-state theme as the
+PSP env field). So the recomp now takes the correct path and the next frontier
+is that divide-by-zero. **Next: trace what should populate `es:[si+0x8]` before
+that div (engine module-state init), or which earlier value the recomp gets
+wrong — verify against the uni harness, which is now the standing oracle.**
 
 ### Resource subsystem wired for Bob; frontier refined to "no main window"
 

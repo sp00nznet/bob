@@ -172,17 +172,30 @@ def main():
     # Function-entry set (global seg, off) taken from the recomp's OWN
     # segments.h, so the uni trace uses the exact same function granularity as
     # the recomp's TRACE_FN and the two traces diff cleanly.
-    import re as _re
+    import re as _re, bisect
     funcs = {}
     seg_h = os.path.join(ROOT, 'runtime', 'segments.h')
     for m in _re.finditer(r'\bseg(\d+)_([0-9A-Fa-f]{4})\b', open(seg_h).read()):
         funcs[(int(m.group(1)), int(m.group(2), 16))] = f"seg{int(m.group(1)):03d}_{m.group(2).upper()}"
+    # per-seg sorted function offsets, to find the function containing an IP.
+    seg_offs = {}
+    for (s, o) in funcs:
+        seg_offs.setdefault(s, []).append(o)
+    for s in seg_offs:
+        seg_offs[s].sort()
+    def func_of(seg, ip):
+        offs = seg_offs.get(seg)
+        if not offs:
+            return None
+        i = bisect.bisect_right(offs, ip) - 1
+        return (seg, offs[i]) if i >= 0 else None
 
     uc = Uc(UC_ARCH_X86, UC_MODE_32)                 # protected mode; D=0 descs
     GDT_ADDR = roundup(len(image), 0x1000)
     TRAP_BASE = GDT_ADDR + 0x10000                   # GDT is a full 64 KB
     GUARD_BASE = TRAP_BASE + 0x10000
-    uc.mem_map(0, roundup(GUARD_BASE + 0x20000, 0x1000))
+    HEAP_BASE = GUARD_BASE + 0x20000                 # GlobalAlloc backing store
+    uc.mem_map(0, roundup(HEAP_BASE + 0x800000, 0x1000))
     uc.mem_write(0, bytes(image))
     uc.mem_write(TRAP_BASE, b"\x90" * 0x10000)       # NOP fill; we stop before exec
 
@@ -249,8 +262,19 @@ def main():
         elif u in ('GETMODULEHANDLE','GETCURRENTINSTANCE','GETMODULEUSAGE'):
             wr('ax', SEL(dgrp))
         elif u in ('GETVERSION',): wr('ax', 0x0A03)
-        elif u in ('GLOBALALLOC','LOCALALLOC','GLOBALLOCK','LOCALLOCK','LOADRESOURCE'):
-            st['heap'] = st.get('heap', 0x4000) + 1; wr('ax', st['heap'])
+        elif u in ('GLOBALALLOC', 'LOCALALLOC', 'ALLOCSELECTOR'):
+            # real bump allocator: a fresh EVEN selector (idx<<3) whose GDT
+            # descriptor points at a fresh 64 KB region -> matches the recomp
+            # (even moveable handle; valid for GlobalLock + memory access).
+            idx = st.setdefault('hsel', 0x800); st['hsel'] += 1
+            hb = st.setdefault('hbase', HEAP_BASE); st['hbase'] += 0x10000
+            uc.mem_write(GDT_ADDR + idx * 8, descr(hb, 0xF2))
+            wr('ax', idx << 3)
+        elif u in ('GLOBALLOCK', 'LOCALLOCK'):
+            h = struct.unpack('<H', uc.mem_read(base[rd('ss') >> 3] + rd('sp') + 4, 2))[0]
+            wr('dx', h); wr('ax', 0)               # far ptr handle:0000
+        elif u in ('LOADRESOURCE', 'GLOBALHANDLE'):
+            wr('ax', st.setdefault('hsel', 0x800) << 3)
         p = get_purge(mod, u)
         return p if p is not None else 0
 
@@ -275,10 +299,17 @@ def main():
         if "--itrace" in sys.argv and st["n"] >= ITFROM:
             print(f"  i[{st['n']:5}] seg{seg}:{rd('ip'):04X} (lin {address:#08x}) "
                   f"bytes={bytes(uc.mem_read(address, min(size,6))).hex()}")
-        # function-entry trace (only host/engine code segs, not trap)
-        fn = funcs.get((seg, rd('ip')))
-        if fn and fn != st["last_fn"]:
-            trace.write(fn + "\n"); st["last_fn"] = fn
+        # function-entry trace. Match the recomp's TRACE_FN, which fires only
+        # when the C function is *entered* (via a call/tail-jmp) -- NOT on an
+        # internal loop back-edge (those are `goto`s after TRACE_FN). So suppress
+        # a hit on a function entry when the previous instruction was already
+        # inside that same function (a back-edge).
+        ip = rd('ip')
+        if (seg, ip) in funcs:
+            pf = func_of(st.get('pseg', -1), st.get('pip', -1))
+            if pf != (seg, ip):
+                trace.write(funcs[(seg, ip)] + "\n")
+        st['pseg'] = seg; st['pip'] = ip
     uc.hook_add(UC_HOOK_CODE, hook_code)
 
     def hook_intr(uc, intno, _):
