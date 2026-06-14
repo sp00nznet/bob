@@ -218,8 +218,16 @@ def main():
     uc.reg_write(UC_X86_REG_CR0, uc.reg_read(UC_X86_REG_CR0) | 1)   # PE
 
     SEL = lambda n: n << 3
-    cs, ip = host.cs + hoff, host.ip
-    dgrp = host.auto_data_seg + hoff
+    # Default: run the UTOPIAWA host (small-model SS=DS=host DGROUP). With
+    # --engine, run the UTOPIA engine LibMain instead (SS=DS=engine DGROUP) --
+    # used to get ground truth for the engine's init path (e.g. the seg008
+    # divide that the recomp crashes on).
+    if "--engine" in sys.argv:
+        cs, ip = engine.cs, engine.ip
+        dgrp = engine.auto_data_seg
+    else:
+        cs, ip = host.cs + hoff, host.ip
+        dgrp = host.auto_data_seg + hoff
     for r, v in ((UC_X86_REG_CS, SEL(cs)), (UC_X86_REG_DS, SEL(dgrp)),
                  (UC_X86_REG_ES, SEL(dgrp)), (UC_X86_REG_SS, SEL(dgrp)),
                  (UC_X86_REG_SP, 0xFFFE)):

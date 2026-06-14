@@ -377,3 +377,33 @@ skipped work may be why InitInstance ends up reporting failure.
   ran at all.
 - `LOCKSEGMENT/UNLOCKSEGMENT/DOS3CALL` PASCAL purge values.
 - Combined flat image + selector table + host `main.c`.
+
+## Milestone: dummy-return sentinel fixes the engine crash (engine now matches oracle 455 funcs)
+
+The engine crashed (#DE div-by-zero at `seg008_0954`) because the recomp's
+call-return model pushed a **dummy return offset of 0**. The retf/ret lift
+dispatches the popped CS:IP (`recomp_dispatch`/`dispatch_near`), and offset `0`
+**collides with the real function at `segNNN_0000`** — so a far `retf` or the
+Win16 idiom `push cs; call near proc; (proc: retf)` wrongly *called*
+`segNNN_0000` instead of cleanly returning. Concretely `seg005_11F7`'s ctor
+walk returned into `seg005_0000` (→ module-state path → div-by-zero) instead of
+`seg005_38F6`.
+
+Fix: push a **sentinel offset `0xFFFF`** (never a function entry — verified no
+`segNNN_FFFF` exists) for every simulated return frame, so the dispatch on the
+dummy frame always MISSES and falls through to a clean C return.
+
+- `tools/ne_lift.py`: far-call frames (lines 121/135) and near-call frames
+  (lines 147/199) now push `0xFFFF` instead of `0`.
+- shared toolkit `tools/lift/lift16.py`: same change to the near/far call frames
+  and the indirect-dispatch push (619/646/660). (Near `ret` is unaffected — it
+  just does `sp+=2; return`, discarding the dummy; only the far `retf` and the
+  `push cs;call near` idiom dispatch the dummy, which is why the value matters.)
+
+Result: **engine LibMain returns ax=0001 and the whole program now runs to
+`exit 0`** (was `exit 127`). Against the Unicorn oracle the engine trace now
+matches **455 functions** (was 39 before this fix, 15 before the indirect-call
+fix). Remaining engine divergence at line 456 (`seg020_01AE` retf-trampoline:
+oracle→`0088`, recomp→`0077`) is a computed-jump target deep in init; the engine
+still completes successfully, so the active frontier returns to the **host**
+R6021 "no main procedure" (no CreateWindow / no message loop).
