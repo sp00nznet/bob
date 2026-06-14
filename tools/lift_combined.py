@@ -130,6 +130,49 @@ def scan_pushed_code_farptrs(ne, ida_off):
     return out
 
 
+def scan_vtable_farptrs(ne, ida_off, min_run=3):
+    """Find C++ vtables / far-pointer dispatch tables embedded in CODE segments
+    (16-bit MFC places the CWinApp vtable inside a code segment, e.g. UTOPIAWA
+    seg1:0x2028). Such a table is a contiguous run of {offset(2), selector(2)}
+    far pointers -- i.e. the SELECTOR-reloc-patched words sit at a regular
+    stride of 4. Scattered far-call/mov instruction operands also carry SELECTOR
+    relocs but never form a stride-4 run, so requiring a run of >= min_run
+    entries cleanly separates real tables from code operands (a broad code-seg
+    chain walk over-promotes mid-function instruction heads and corrupts the
+    lift). For each table entry promote its offset word when it is an IDA code
+    head in the target code segment, so `call far [vtable+N]` dispatches to a
+    real function instead of missing (InitInstance/Run were dead before this).
+
+    Returns {global_code_seg(str): set(offsets)}. Call AFTER offset_module."""
+    from ne_decode import build_reloc_map
+    code_idx = {s.index for s in ne.segments if s.is_code}
+    out = {}
+    for s in ne.segments:
+        if not s.is_code or not s.data:
+            continue
+        rm = build_reloc_map(s, ne)
+        sel = {o: ann.reloc.target_seg for o, ann in rm.items()
+               if ann.reloc.src_type == 2 and ann.reloc.target_seg in code_idx}
+        locs = sorted(sel)
+        i = 0
+        while i < len(locs):
+            j = i
+            while j + 1 < len(locs) and locs[j + 1] == locs[j] + 4:
+                j += 1
+            if j - i + 1 >= min_run:                  # a stride-4 far-ptr table
+                for k in range(i, j + 1):
+                    loc = locs[k]
+                    if loc - 2 < 0:
+                        continue
+                    off = struct.unpack_from('<H', s.data, loc - 2)[0]
+                    tseg = sel[loc]
+                    heads = ida_off.get(str(tseg), {}).get('heads')
+                    if heads and off in set(heads):
+                        out.setdefault(str(tseg), set()).add(off)
+            i = j + 1
+    return out
+
+
 def build_ida_map(src_name, offset, ne):
     """Load the IDA map, re-key to global seg numbers, fold in far-pointer code
     entries (data tables + inline `push seg/offset`), write to disk and point
@@ -143,8 +186,19 @@ def build_ida_map(src_name, offset, ne):
     off = {str(int(k) + offset): v for k, v in data.items()}
     extra = scan_data_farptrs(ne, off)
     pushed = scan_pushed_code_farptrs(ne, off)
-    for gseg, offs in pushed.items():
-        extra.setdefault(gseg, set()).update(offs)
+    srcs = [pushed]
+    # Code-segment vtable promotion is currently enabled for the HOST module
+    # only (offset 30 == UTOPIAWA). The host's MFC AfxWinMain dispatches
+    # InitInstance/Run through the CWinApp vtable in code seg1; without these
+    # promotions those virtual calls miss and no window is ever created. The
+    # engine (offset 0) returns ax=0001 cleanly WITHOUT this and regresses with
+    # it (its init path derails through some promoted entry) -- gated off until
+    # that is understood. See docs/BRINGUP.md.
+    if offset == 30:
+        srcs.append(scan_vtable_farptrs(ne, off))
+    for src in srcs:
+        for gseg, offs in src.items():
+            extra.setdefault(gseg, set()).update(offs)
     n = 0
     for gseg, offs in extra.items():
         funcs = set(off[gseg].get('functions', []))
