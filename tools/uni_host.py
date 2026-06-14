@@ -264,6 +264,11 @@ def main():
         if u == 'INITTASK':
             wr('ax', 1); wr('cx', 0x4000); wr('dx', 1); wr('si', 0)
             wr('di', SEL(dgrp)); wr('es', SEL(dgrp)); wr('bx', 0x80); wr('bp', 0)
+            # Empty command line in the (fake) PSP at DGROUP:0080 -- mirror the
+            # recomp's KERNEL_INITTASK (length byte 0, CR). Without this the
+            # oracle reads stale static image bytes at 0x81 and wanders into
+            # garbage command-line parsing (false divergence at seg035_0772).
+            uc.mem_write(base[dgrp] + 0x80, bytes([0x00, 0x0D]))
         elif u == 'REGISTERCLASS':
             st['atom'] = st.get('atom', 0xC000) + 1; wr('ax', st['atom'])
         elif u in ('GETCURRENTTASK',): wr('ax', 0x00FF)

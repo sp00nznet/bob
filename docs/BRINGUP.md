@@ -407,3 +407,33 @@ fix). Remaining engine divergence at line 456 (`seg020_01AE` retf-trampoline:
 oracle→`0088`, recomp→`0077`) is a computed-jump target deep in init; the engine
 still completes successfully, so the active frontier returns to the **host**
 R6021 "no main procedure" (no CreateWindow / no message loop).
+
+## Milestone: CWinApp vtable promoted -> InitInstance now runs (host)
+
+After the sentinel fix the host reached AfxWinMain (seg032_1C2A) cleanly, but
+the C++ virtual dispatches `call far [vtable+0x38/0x3C/0x40]`
+(InitApplication/InitInstance/Run) all MISSED -> the app did nothing and exited
+with R6021 "no main procedure". Root cause: the **CWinApp vtable lives inside a
+CODE segment** (UTOPIAWA seg1:0x2028) as a stride-4 table of {offset, selector}
+far pointers, and `scan_data_farptrs` only scanned DATA segments. The targets
+(seg32:1cad InitApplication, seg36:2e61 InitInstance, seg32:151d Run) were IDA
+instruction-heads but never promoted to functions, so `dispatch_far` found
+nothing.
+
+Fix: new `scan_vtable_farptrs` in `lift_combined.py` detects far-pointer tables
+in code segments as **contiguous stride-4 runs of SELECTOR-reloc locations**
+(via chain-expanded `build_reloc_map`) and promotes each entry's offset word
+when it is an IDA code head. A broad code-segment chain walk over-promotes
+mid-function instruction heads (+2435) and **crashes the engine**, so the scan
+requires a stride-4 run (>=3 entries) which cleanly isolates real tables from
+scattered far-call operands. Currently **gated to the host module (offset 30)**:
+the engine (offset 0) returns ax=0001 cleanly without it and regresses with it
+(some promoted entry derails its init) -- TODO understand that before enabling.
+
+Result: InitApplication (seg32:1cad) and **InitInstance (seg36:2e61) now
+dispatch and run** -- InitInstance executes real work (SetHandleCount,
+CoBuildVersion/OLE, wsprintf, WritePrivateProfileString). NEW FRONTIER:
+**InitInstance returns FALSE** (AfxWinMain takes the seg032_66A3 fail path, skips
+Run(), no message loop) -> still exits via "no main procedure". Next: find which
+check in seg036_2E61 fails (likely a stubbed Win16/OLE/profile/Jet-DB return
+value), since the recomp now faithfully runs Bob's real InitInstance.
