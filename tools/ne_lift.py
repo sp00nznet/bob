@@ -118,7 +118,7 @@ class NELifter(Lifter):
         if m == 'call' and op1 and op1.type == OpType.FAR:
             func_name = self._resolve_far_call(inst)
             if func_name and not func_name.startswith('/*'):
-                self._emit(f'push16(cpu, cpu->cs); push16(cpu, 0);', 'far call return addr')
+                self._emit(f'push16(cpu, cpu->cs); push16(cpu, 0xFFFF);', 'far call return addr')
                 self._emit(f'{func_name}(cpu);', orig)
             elif func_name:
                 self._emit(func_name, orig)
@@ -132,7 +132,7 @@ class NELifter(Lifter):
             read = (f'uint16_t _o = mem_read16(cpu, {seg_e}, {off_e}); '
                     f'uint16_t _s = mem_read16(cpu, {seg_e}, (uint16_t)({off_e} + 2));')
             if m == 'call far':
-                self._emit(f'{{ {read} push16(cpu, cpu->cs); push16(cpu, 0); '
+                self._emit(f'{{ {read} push16(cpu, cpu->cs); push16(cpu, 0xFFFF); '
                            f'dispatch_far(cpu, _s, _o); }}', orig)
             else:  # jmp far -> tail dispatch
                 self._emit(f'{{ {read} dispatch_far(cpu, _s, _o); return; }}', orig)
@@ -144,7 +144,7 @@ class NELifter(Lifter):
             idx = self.seg.index
             if m == 'call':
                 self._emit(f'{{ uint16_t _o = mem_read16(cpu, {seg_e}, {off_e}); '
-                           f'push16(cpu, 0); dispatch_near(cpu, {idx}, _o); }}', orig)
+                           f'push16(cpu, 0xFFFF); dispatch_near(cpu, {idx}, _o); }}', orig)
             else:  # jmp near indirect -> tail dispatch
                 self._emit(f'{{ uint16_t _o = mem_read16(cpu, {seg_e}, {off_e}); '
                            f'dispatch_near(cpu, {idx}, _o); return; }}', orig)
@@ -196,7 +196,7 @@ class NELifter(Lifter):
             target = op1.disp
             func_name = f'seg{self.seg.index:03d}_{target:04X}'
             self.func_calls.add(func_name)
-            self._emit(f'push16(cpu, 0);', 'near call return addr')
+            self._emit(f'push16(cpu, 0xFFFF);', 'near call return addr')
             self._emit(f'{func_name}(cpu);', orig)
             return
 
