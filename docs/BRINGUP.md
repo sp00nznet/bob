@@ -437,3 +437,30 @@ CoBuildVersion/OLE, wsprintf, WritePrivateProfileString). NEW FRONTIER:
 Run(), no message loop) -> still exits via "no main procedure". Next: find which
 check in seg036_2E61 fails (likely a stubbed Win16/OLE/profile/Jet-DB return
 value), since the recomp now faithfully runs Bob's real InitInstance.
+
+## Frontier: InitInstance fails on OLE Automation (seg002_7BEC)
+
+Traced exactly why InitInstance (seg036_2E61) returns FALSE. Its body
+(seg036_2E83) does, near the top:
+  SetMessageQueue(0x60)            -> ok (ax != 0)
+  dx = seg002_7BEC(host_ds:0x92A)  -> dx = 0x8004 (negative)
+  or dx,dx ; jl 5F50               -> taken -> 5F50: xor ax,ax (return FALSE)
+
+`seg002_7BEC` is an **OLE Automation** engine routine (its call tree uses
+OLE2DISP SysAllocString/SysStringLen/SysFreeString). It is handed a far pointer
+to `host_ds:0x92A`, which is a statically-NULL far-pointer slot (zeros, no
+reloc -- an OLE object/interface pointer meant to be live by now). With OLE
+stubbed, 7BEC returns an HRESULT-style error `0x8004792E` (the engine is full of
+`mov dx,0x8004` / `mov eax,0x80044E26` OLE error returns), so MFC AfxWinMain
+takes the InitInstance-failed path (seg032_66A3), skips Run()/the message loop,
+and the process exits via the post-WinMain "no main procedure".
+
+So the recomp now FAITHFULLY runs Bob's real InitInstance up to its first hard
+OLE dependency. **Microsoft Bob is fundamentally an OLE Automation app** (it is
+an OLE container/automation client over its Access/Jet data store), so the next
+milestone is an **OLE Automation shim subsystem** (COMPOBJ + OLE2DISP +
+typelib/IDispatch + a minimal class registry), not another lifting fix -- the
+differential oracle found zero lifting bugs past the harness gaps. Faking 7BEC
+success is not viable: it returns a live interface pointer stored at 0x92A that
+later code dereferences. Quick map of OLE error sites: `grep 'mov dx,0x8004'`
+across src/seg002.c (engine OLE dispatch).
