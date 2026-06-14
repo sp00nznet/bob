@@ -77,42 +77,47 @@ your own OEM/retail disc, then extract:
 7z x game/iso/U1.CAB -ogame/install   # UTOPIA.DLL, UTOPIAWA.EXE, ACTORS\*.ACT, ...
 ```
 
-## Status: Bringup — engine init correct; host runs WinMain ✅
+## Status: Bringup — engine + host run faithfully; MFC InitInstance reached ✅
 
-All three modules lift to link-clean C, the recompiled **engine LibMain
-initializes cleanly**, and the **host reaches and runs WinMain**.
+All three modules lift to link-clean C. The recompiled **engine LibMain
+initializes cleanly** (`ax=0001`), the **host runs its full MFC AfxWinMain**,
+and **`CWinApp::InitInstance` now dispatches and executes Bob's real startup
+code**. A Unicorn differential harness (`tools/uni_host.py`) runs the *original*
+binary as a ground-truth oracle: the recompiled engine matches it for **455
+functions** and the host for **3677 functions** — i.e. the lift is faithful
+(every divergence chased down was a harness gap, not a recomp bug).
 
 ```
-engine entry: seg5:120D (UTOPIA LibMain)   host entry: seg35:0002 (UTOPIAWA)
-[win16] GlobalAlloc(2002,4096) -> 4000 ; RegisterClass ; ...
-UTOPIA LibMain returned (ax=0001) after 100 lifted calls   ✅ engine init OK
-... host C0 startup -> WinMain (seg032_1C2A) runs: SetWindowsHook, ...
+UTOPIA LibMain returned (ax=0001) after 784 lifted calls    ✅ engine init OK
+host -> AfxWinMain (seg032_1C2A) -> InitApplication -> InitInstance (seg036_2E61)
+InitInstance: SetHandleCount, CoBuildVersion(OLE), wsprintf, WritePrivateProfile...
 ```
 
 The fixes that got here (see **[docs/BRINGUP.md](docs/BRINGUP.md)**):
-1. **NE seg 1 is data, not code** — IDA found zero instructions in it (a
-   far-pointer dispatch table); the lifter was linear-sweeping it into garbage.
-   `lift_combined.py` skips "code" segments with no IDA heads (kept as data).
-2. **64 KB DGROUP + small-model SS=DS** — the C-runtime accesses globals via
-   `ss:[abs]` assuming `SS==DS==DGROUP`; `gen_image_bob.py` allocates DGROUP/
-   stack a full 64 KB and the engine runs `SS=DS=`engine DGROUP.
-3. **Far-call SELECTOR-fixup offset bug (major)** — a `call far SEG:off` whose
-   selector carries a SELECTOR(2) relocation kept its offset in the instruction
-   immediate, but the lifter used the relocation's `target_off` (0 for selector
-   fixups), sending **every such call to offset 0** (a stub). This silently
-   no-op'd cross-segment calls — incl. the host's `call WinMain` (→ `seg032_0000`
-   stub instead of `seg032_1C2A`). Fixed in `ne_lift.py`. This also revealed the
-   old "24,680-call" LibMain was the *buggy* wandering path; the correct lean
-   LibMain is ~100 calls returning success.
-4. **Stub return values / purges** — `RegisterClass` now returns a non-zero atom
-   (0 = failure aborted init); `InitTask` returns the stack *limit* in CX (not
-   the top, which infinite-looped); purges for `SetWindowsHook`/etc.
+1. **NE seg 1 is data, not code**, **64 KB DGROUP + small-model SS=DS**, and the
+   **far-call SELECTOR-fixup offset bug** — early bring-up fixes (details in
+   BRINGUP.md) that got the engine + host C-runtime running.
+2. **Register-indirect calls were dropped** — `call di`/`call [mem]` were emitted
+   as no-ops; the harness caught it. `ne_lift.py` now enables indirect dispatch.
+3. **Dummy-return sentinel (`0xFFFF`)** — the call-return model pushed a dummy
+   return offset of `0`, which collided with the real function at `segNNN_0000`,
+   so far `retf` / the `push cs; call near` idiom *called* `segNNN_0000` instead
+   of returning. Pushing a `0xFFFF` sentinel fixed an engine crash and advanced
+   the oracle match from 39 → 455 functions.
+4. **CWinApp vtable promotion** — the MFC vtable lives inside a *code* segment as
+   a stride-4 far-pointer table; the scanner only looked in data segments, so the
+   `InitApplication`/`InitInstance`/`Run` virtual dispatches all missed and the
+   app did nothing. `scan_vtable_farptrs` now promotes them, so **InitInstance
+   runs**.
 
-**Current frontier:** the host's **WinMain runs ~27 calls then exits early**
-(a stub returning failure, like RegisterClass did for the engine), so the C0
-startup falls through to the R6021 "no main procedure" fallback. Next: follow
-WinMain (`seg032_1C2A`) to the stub/check that makes it bail, and make the
-process-exit path terminate instead of returning. See docs/BRINGUP.md.
+**Current frontier — OLE Automation.** InitInstance runs faithfully up to its
+first hard dependency: `seg002_7BEC` (an OLE Automation routine using
+`OLE2DISP` `SysAllocString`/etc.) returns an HRESULT error `0x8004792E` because
+OLE is stubbed, so MFC skips `Run()`/the message loop and the process exits.
+**Microsoft Bob is fundamentally an OLE Automation app** (an automation client
+over its Access/Jet data store), so the next milestone is an **OLE Automation
+shim subsystem** (COMPOBJ + OLE2DISP + IDispatch/typelib + a minimal class
+registry) — not another lifting fix. See docs/BRINGUP.md.
 
 ### How it lifts (the three modules → one program)
 
