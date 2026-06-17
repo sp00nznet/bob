@@ -146,6 +146,39 @@ def scan_vtable_farptrs(ne, ida_off, min_run=3):
     Returns {global_code_seg(str): set(offsets)}. Call AFTER offset_module."""
     from ne_decode import build_reloc_map
     code_idx = {s.index for s in ne.segments if s.is_code}
+    seg_by_idx = {s.index: s for s in ne.segments}
+
+    def is_fn_start(tseg, off):
+        """True only when `off` is a genuine function entry, i.e. the preceding
+        instruction is a RET/RETF (a vtable method is the byte after the prior
+        method's `retf`). This rejects stride-4 FALSE POSITIVES from far JUMP
+        TABLES, whose entries are mid-function case/loop labels reached by a
+        Jcc/jmp (e.g. seg005_16EA, a loop header preceded by `EB 0D` jmp) --
+        promoting those splits the loop and ne_lift turns the backward jump into
+        an infinite-recursing tail-call. Walk back over NOP/INT3 padding too."""
+        tg = seg_by_idx.get(tseg)
+        if not tg or not tg.data:
+            return False
+        hs = ida_off.get(str(tseg), {}).get('heads')
+        if not hs:
+            return False
+        heads_below = [h for h in hs if h < off]
+        if not heads_below:
+            return True                              # nothing before -> seg start
+        prev = max(heads_below)
+        d = tg.data
+        for _ in range(8):                           # skip a little padding
+            op = d[prev] if prev < len(d) else 0
+            if op in (0xC3, 0xCB, 0xC2, 0xCA):       # ret/retf [imm16]
+                return True
+            if op in (0x90, 0xCC):                   # nop / int3 padding
+                below = [h for h in hs if h < prev]
+                if not below:
+                    return True
+                prev = max(below); continue
+            return False
+        return False
+
     out = {}
     for s in ne.segments:
         if not s.is_code or not s.data:
@@ -167,7 +200,7 @@ def scan_vtable_farptrs(ne, ida_off, min_run=3):
                     off = struct.unpack_from('<H', s.data, loc - 2)[0]
                     tseg = sel[loc]
                     heads = ida_off.get(str(tseg), {}).get('heads')
-                    if heads and off in set(heads):
+                    if heads and off in set(heads) and is_fn_start(tseg, off):
                         out.setdefault(str(tseg), set()).add(off)
             i = j + 1
     return out
@@ -194,7 +227,7 @@ def build_ida_map(src_name, offset, ne):
     # engine (offset 0) returns ax=0001 cleanly WITHOUT this and regresses with
     # it (its init path derails through some promoted entry) -- gated off until
     # that is understood. See docs/BRINGUP.md.
-    if offset == 30:
+    if offset == 30:                          # host module only (see BRINGUP.md)
         srcs.append(scan_vtable_farptrs(ne, off))
     for src in srcs:
         for gseg, offs in src.items():

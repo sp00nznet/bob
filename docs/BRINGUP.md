@@ -515,3 +515,11 @@ target; (b) skip offsets that are targets of intra-function backward jumps;
 (c) teach ne_lift to emit a `goto` (not a tail-call) for a backward jump whose
 target was promoted from inside the same original IDA function. Until then
 engine vtable promotion stays gated to the host (offset 30).
+
+**Update:** added an `is_fn_start` guard to scan_vtable_farptrs -- only promote a
+stride-4 entry whose preceding instruction is a `ret`/`retf` (a real vtable
+method follows the prior method's `retf`; a jump-table/loop label is preceded by
+a `jmp`/fall-through). This cut host false positives 599->473 (host still builds
+the window identically) and removes the loop-header class. The engine still
+crashes with promotion enabled (other false-positive classes remain), so it
+stays gated to the host; the guard is the foundation for enabling it later.
