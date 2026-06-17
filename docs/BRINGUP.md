@@ -464,3 +464,33 @@ differential oracle found zero lifting bugs past the harness gaps. Faking 7BEC
 success is not viable: it returns a live interface pointer stored at 0x92A that
 later code dereferences. Quick map of OLE error sites: `grep 'mov dx,0x8004'`
 across src/seg002.c (engine OLE dispatch).
+
+## Milestone: headless window subsystem -> MFC creates & subclasses the main window
+
+With OLE init working, InitInstance reaches CreateWindowEx to build the main
+frame (class "AfxFrameOrView", title "Daemon"). The engine's CWnd::CreateEx
+(seg007_21CC) subclasses the new window through a WH_CALLWNDPROC hook:
+AfxHookWindowCreate (seg007_0E32) stashes the CWnd* at pWndInit (SEG_24:0x9696)
+and installs MFC's _AfxCallWndProc (seg7:0xEFB); during CreateWindowEx the new
+window must receive WM_NCCREATE *through that hook* so MFC attaches m_hWnd (adds
+to the permanent HWND map) and clears pWndInit -- else AfxUnhookWindowCreate
+(seg007_1B74) fails and CreateEx returns FALSE (no window).
+
+Implemented a cross-platform headless window manager in win16_impl.c:
+- SetWindowsHook / SetWindowsHookEx capture the guest hook proc into a table.
+- CreateWindowEx allocates a guest HWND, synthesizes a WM_NCCREATE CWPSTRUCT
+  ({lParam@0, wParam@4, message@6=0x81, hwnd@8}) in a galloc'd scratch selector,
+  and re-entrantly calls the registered WH_CALLWNDPROC hook (catz-style
+  call_guest: snapshot regs, push HookProc(nCode,wParam,lParam) args + far
+  frame, dispatch_far, restore regs but keep allocations). Correct 34-byte purge.
+
+Verified: the hook fires (seg007_0EFB), FromHandlePermanent misses (empty map),
+MFC attaches (seg007_1170) and SetWindowLong-subclasses, **pWndInit clears 4000:0356
+-> 0000:0000 and the map nCount goes 0 -> 1**. CreateEx returns TRUE -- the main
+window is created and attached.
+
+NEXT: InitInstance's big OLE routine seg002_7BEC now runs all the way through
+window creation but still returns an HRESULT error (was 0x8004792E, now
+**0x80040033** -- a different/later OLE Automation dependency deeper in). Bob's
+InitInstance is OLE-Automation-heavy; each stubbed OLE op surfaces as the next
+0x8004xxxx. Next: trace where 0x80040033 originates in 7BEC's post-window tree.

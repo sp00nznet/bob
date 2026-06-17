@@ -439,8 +439,32 @@ void USER_REGISTERCLASS(CPU *cpu) {
  * (non-zero handle). SetWindowsHookEx(idHook, lpfn, hMod, hTask): 2+4+2+2 = 10.
  * The stub guessed purge 0 (corrupting the stack) and returned 0 (= failure,
  * which made MFC InitInstance bail). Return a non-zero HHOOK. */
-void USER_SETWINDOWSHOOK(CPU *cpu)   { cpu->ax = 0x4801; ret(cpu, 6); }
-void USER_SETWINDOWSHOOKEX(CPU *cpu) { cpu->ax = 0x4802; ret(cpu, 10); }
+/* Win16 hook table (index = idHook + 1; idHook ranges WH_MSGFILTER(-1)..15).
+ * MFC installs a WH_CALLWNDPROC (idHook 4) hook to subclass windows during
+ * creation -- CreateWindowEx replays WM_NCCREATE through it (see below). */
+#define WH_TBL_N 17
+static struct { uint16_t seg, off; } g_hook[WH_TBL_N];   /* [idHook+1] */
+static void set_hook(int idHook, uint16_t seg, uint16_t off) {
+    if (idHook >= -1 && idHook + 1 < WH_TBL_N) {
+        g_hook[idHook + 1].seg = seg; g_hook[idHook + 1].off = off;
+    }
+}
+static int have_hook(int idHook) {
+    return idHook >= -1 && idHook + 1 < WH_TBL_N && g_hook[idHook + 1].seg;
+}
+
+/* HHOOK SetWindowsHook(int idHook, HOOKPROC lpfn): idHook(2)+lpfn(4)=6 bytes.
+ * a16(0)=lpfn off, a16(2)=lpfn seg, a16(4)=idHook. */
+void USER_SETWINDOWSHOOK(CPU *cpu) {
+    set_hook((int16_t)a16(cpu, 4), a16(cpu, 2), a16(cpu, 0));
+    cpu->ax = 0x4801; cpu->dx = 0; ret(cpu, 6);
+}
+/* HHOOK SetWindowsHookEx(idHook, lpfn, hMod, hTask): 2+4+2+2 = 10 bytes.
+ * a16(4)=lpfn off, a16(6)=lpfn seg, a16(8)=idHook. */
+void USER_SETWINDOWSHOOKEX(CPU *cpu) {
+    set_hook((int16_t)a16(cpu, 8), a16(cpu, 6), a16(cpu, 4));
+    cpu->ax = 0x4802; cpu->dx = 0; ret(cpu, 10);
+}
 void USER_UNHOOKWINDOWSHOOK(CPU *cpu)   { cpu->ax = 1; ret(cpu, 4); }
 void USER_UNHOOKWINDOWSHOOKEX(CPU *cpu) { cpu->ax = 1; ret(cpu, 4); }
 void USER_GETSYSTEMMENU(CPU *cpu)  { cpu->ax = FAKE_HANDLE; ret(cpu, 4); }
@@ -639,4 +663,72 @@ void COMPOBJ_COINITIALIZE(CPU *cpu) {
 /* void CoUninitialize(void). */
 void COMPOBJ_COUNINITIALIZE(CPU *cpu) {
     ret(cpu, 0);
+}
+
+/* ===== USER: headless window subsystem =====
+ * Bob's MFC creates its main window (class "AfxFrameOrView") via CWnd::CreateEx,
+ * which subclasses the new window through a WH_CALLWNDPROC hook:
+ * AfxHookWindowCreate stashes the CWnd* (pWndInit) and installs MFC's
+ * _AfxCallWndProc (seg32:13BD); during CreateWindowEx the window must receive
+ * WM_NCCREATE *through that hook* so MFC attaches m_hWnd and clears pWndInit --
+ * otherwise AfxUnhookWindowCreate fails and CreateEx returns FALSE (no window).
+ *
+ * So CreateWindowEx allocates a guest HWND and replays a WM_NCCREATE CWPSTRUCT
+ * through the registered WH_CALLWNDPROC hook. This is a headless window manager:
+ * the guest message routing / painting logic runs unchanged; a platform display
+ * (SDL) can mirror these windows later. */
+
+/* Re-entrantly call a guest far proc with `n` pre-shaped Win16 arg words (pushed
+ * in order). Snapshot+restore registers so the interrupted shim caller is left
+ * intact; memory effects (the subclass clearing pWndInit) persist. Mirrors the
+ * catz win32_backend re-entrant WNDPROC dispatch. */
+static uint16_t call_guest(CPU *cpu, uint16_t seg, uint16_t off,
+                           const uint16_t *words, int n) {
+    CPU save = *cpu;
+    for (int i = 0; i < n; i++) push16(cpu, words[i]);
+    push16(cpu, cpu->cs); push16(cpu, 0xFFFF);     /* far return frame */
+    dispatch_far(cpu, seg, off);
+    uint16_t rax = cpu->ax;
+    uint32_t hn = cpu->heap_next; uint16_t ns = cpu->next_sel;
+    *cpu = save;                                    /* restore regs (incl. SP) */
+    cpu->heap_next = hn; cpu->next_sel = ns;        /* but keep any allocations */
+    return rax;
+}
+
+static uint16_t g_cwp_sel = 0;          /* scratch selector for the CWPSTRUCT */
+static uint16_t g_next_hwnd = 0x1000;   /* handed-out guest HWNDs */
+
+/* HWND CreateWindowEx(dwExStyle,lpClassName,lpWindowName,dwStyle,x,y,w,h,
+ *   hWndParent,hMenu,hInstance,lpParam) = 34 arg bytes (PASCAL). */
+void USER_CREATEWINDOWEX(CPU *cpu) {
+    uint16_t cls_o = a16(cpu, 26), cls_s = a16(cpu, 28);
+    uint16_t ttl_o = a16(cpu, 22), ttl_s = a16(cpu, 24);
+    char cls[64] = "?", ttl[128] = "";
+    if (cls_s == 0) snprintf(cls, sizeof cls, "#atom%04X", cls_o);
+    else read_asciiz(cpu, cls_s, cls_o, cls, sizeof cls);
+    if (ttl_s) read_asciiz(cpu, ttl_s, ttl_o, ttl, sizeof ttl);
+
+    uint16_t hwnd = g_next_hwnd; g_next_hwnd += 4;
+    IMPL_LOG("[win16] CreateWindowEx class='%s' title='%s' -> hwnd=%04X\n",
+             cls, ttl, hwnd);
+
+    /* Drive MFC's subclass: deliver WM_NCCREATE via the WH_CALLWNDPROC hook so
+     * _AfxCallWndProc attaches the CWnd (m_hWnd=hwnd) and clears pWndInit. The
+     * hook reads a CWPSTRUCT {lParam@0, wParam@4, message@6, hwnd@8}; HookProc
+     * args are (int nCode, WPARAM wParam, LPARAM lParam). */
+    if (have_hook(4)) {                              /* WH_CALLWNDPROC */
+        if (!g_cwp_sel) g_cwp_sel = galloc(cpu, 16);
+        if (g_cwp_sel) {
+            mem_write32(cpu, g_cwp_sel, 0, 0);       /* lParam (CREATESTRUCT) */
+            mem_write16(cpu, g_cwp_sel, 4, 0);       /* wParam */
+            mem_write16(cpu, g_cwp_sel, 6, 0x0081);  /* message = WM_NCCREATE */
+            mem_write16(cpu, g_cwp_sel, 8, hwnd);    /* hwnd */
+            uint16_t args[4] = { 0,              /* nCode = HC_ACTION */
+                                 0,              /* wParam */
+                                 g_cwp_sel, 0 }; /* lParam = CWPSTRUCT seg:off */
+            call_guest(cpu, g_hook[5].seg, g_hook[5].off, args, 4);
+        }
+    }
+    cpu->ax = hwnd;
+    ret(cpu, 34);
 }
