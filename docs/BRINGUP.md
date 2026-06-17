@@ -494,3 +494,24 @@ window creation but still returns an HRESULT error (was 0x8004792E, now
 **0x80040033** -- a different/later OLE Automation dependency deeper in). Bob's
 InitInstance is OLE-Automation-heavy; each stubbed OLE op surfaces as the next
 0x8004xxxx. Next: trace where 0x80040033 originates in 7BEC's post-window tree.
+
+## Engine vtable promotion: blocked by loop-header false positives
+
+The OLE-Automation virtual dispatches in InitInstance (e.g. seg021_004B's
+`call far es:[bx+0xC]`) need the ENGINE's code-segment vtables promoted, but
+enabling scan_vtable_farptrs for the engine (offset 0) makes engine init wander
+(48k+ calls) and crash. Root cause: the stride-4 scan false-positives on a far
+**jump table** in seg005 -- it promotes mid-function offsets that are *loop
+headers* (e.g. seg005_16EA, the target of `je 16EA` from seg005_16F7's lodsw
+loop). Promoting a loop header splits the function, so ne_lift emits the
+backward `je 16EA` as a tail-call `seg005_16EA(cpu); return;` instead of a
+`goto` -- turning the loop into unbounded recursion -> stack blowup.
+
+The stride-4 heuristic cannot tell a real vtable (entries are clean function
+starts) from a far jump table (entries are case/loop labels mid-function). Next
+options: (a) only promote an offset when the instruction preceding it is a
+terminator (ret/retf/jmp) so it's a genuine function start, not a fall-through
+target; (b) skip offsets that are targets of intra-function backward jumps;
+(c) teach ne_lift to emit a `goto` (not a tail-call) for a backward jump whose
+target was promoted from inside the same original IDA function. Until then
+engine vtable promotion stays gated to the host (offset 30).
