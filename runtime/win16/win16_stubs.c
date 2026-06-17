@@ -153,7 +153,6 @@ void GDI_UNREALIZEOBJECT(CPU *cpu) { (void)cpu; WIN16_LOG("UNREALIZEOBJECT"); cp
 
 /* ===== KERNEL ===== */
 void KERNEL_ADDATOM(CPU *cpu) { (void)cpu; WIN16_LOG("ADDATOM"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("ADDATOM"); }
-void KERNEL_CATCH(CPU *cpu) { (void)cpu; WIN16_LOG("CATCH"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("CATCH"); }
 void KERNEL_DOS3CALL(CPU *cpu) { (void)cpu; WIN16_LOG("DOS3CALL"); cpu->ax = 0; cpu->sp += 4 + 0; }
 void KERNEL_FATALEXIT(CPU *cpu) { (void)cpu; WIN16_LOG("FATALEXIT"); cpu->ax = 0; cpu->sp += 4 + 2; }
 void KERNEL_FINDATOM(CPU *cpu) { (void)cpu; WIN16_LOG("FINDATOM"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("FINDATOM"); }
@@ -266,8 +265,6 @@ void MSAJT110_MSAJT110_202(CPU *cpu) { (void)cpu; WIN16_LOG("MSAJT110_202"); cpu
 
 /* ===== OLE2 ===== */
 void OLE2_DODRAGDROP(CPU *cpu) { (void)cpu; WIN16_LOG("DODRAGDROP"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("DODRAGDROP"); }
-void OLE2_OLEINITIALIZE(CPU *cpu) { (void)cpu; WIN16_LOG("OLEINITIALIZE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("OLEINITIALIZE"); }
-void OLE2_OLEUNINITIALIZE(CPU *cpu) { (void)cpu; WIN16_LOG("OLEUNINITIALIZE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("OLEUNINITIALIZE"); }
 void OLE2_REGISTERDRAGDROP(CPU *cpu) { (void)cpu; WIN16_LOG("REGISTERDRAGDROP"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("REGISTERDRAGDROP"); }
 void OLE2_REVOKEDRAGDROP(CPU *cpu) { (void)cpu; WIN16_LOG("REVOKEDRAGDROP"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("REVOKEDRAGDROP"); }
 void OLE2__IID_IDATAOBJECT(CPU *cpu) { (void)cpu; WIN16_LOG("_IID_IDATAOBJECT"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("_IID_IDATAOBJECT"); }
