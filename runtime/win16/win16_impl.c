@@ -614,3 +614,29 @@ void dos_int21(CPU *cpu) {
     }
     /* `int` is not a far call - no stack frame to clean. */
 }
+
+/* ===== OLE / COM: COMPOBJ + OLE2DISP =====
+ * Microsoft Bob is an OLE Automation application (an automation client/server
+ * over its Access/Jet data store). MFC's InitInstance calls into the engine's
+ * OLE bring-up (seg011), which first validates the OLE build version and then
+ * CoInitializes. These shims provide just enough of the COM base + the BSTR
+ * Automation layer to let InitInstance proceed toward creating the main window.
+ * Returns follow the 16-bit OLE ABI: HRESULT/SCODE in DX:AX (S_OK == 0). */
+
+/* DWORD CoBuildVersion(void) -> HIWORD=major(rmm), LOWORD=build(rup).
+ * seg011_1039 requires DX==0x17 (23) and AX>=0x26A (618): OLE2 16-bit. */
+void COMPOBJ_COBUILDVERSION(CPU *cpu) {
+    cpu->dx = 0x0017; cpu->ax = 0x026A;
+    ret(cpu, 0);
+}
+
+/* HRESULT CoInitialize(LPMALLOC pMalloc) -> S_OK. One far-pointer arg (4 bytes). */
+void COMPOBJ_COINITIALIZE(CPU *cpu) {
+    cpu->dx = 0; cpu->ax = 0;              /* S_OK */
+    ret(cpu, 4);
+}
+
+/* void CoUninitialize(void). */
+void COMPOBJ_COUNINITIALIZE(CPU *cpu) {
+    ret(cpu, 0);
+}

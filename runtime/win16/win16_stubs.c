@@ -31,11 +31,8 @@ void COMMDLG_PRINTDLG(CPU *cpu) { (void)cpu; WIN16_LOG("PRINTDLG"); cpu->ax = 0;
 
 /* ===== COMPOBJ ===== */
 void COMPOBJ_CLSIDFROMPROGID(CPU *cpu) { (void)cpu; WIN16_LOG("CLSIDFROMPROGID"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("CLSIDFROMPROGID"); }
-void COMPOBJ_COBUILDVERSION(CPU *cpu) { (void)cpu; WIN16_LOG("COBUILDVERSION"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("COBUILDVERSION"); }
 void COMPOBJ_COCREATEGUID(CPU *cpu) { (void)cpu; WIN16_LOG("COCREATEGUID"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("COCREATEGUID"); }
 void COMPOBJ_COGETMALLOC(CPU *cpu) { (void)cpu; WIN16_LOG("COGETMALLOC"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("COGETMALLOC"); }
-void COMPOBJ_COINITIALIZE(CPU *cpu) { (void)cpu; WIN16_LOG("COINITIALIZE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("COINITIALIZE"); }
-void COMPOBJ_COUNINITIALIZE(CPU *cpu) { (void)cpu; WIN16_LOG("COUNINITIALIZE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("COUNINITIALIZE"); }
 void COMPOBJ_ISEQUALGUID(CPU *cpu) { (void)cpu; WIN16_LOG("ISEQUALGUID"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("ISEQUALGUID"); }
 void COMPOBJ_PROGIDFROMCLSID(CPU *cpu) { (void)cpu; WIN16_LOG("PROGIDFROMCLSID"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("PROGIDFROMCLSID"); }
 void COMPOBJ__IID_ICLASSFACTORY(CPU *cpu) { (void)cpu; WIN16_LOG("_IID_ICLASSFACTORY"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("_IID_ICLASSFACTORY"); }
