@@ -77,7 +77,7 @@ your own OEM/retail disc, then extract:
 7z x game/iso/U1.CAB -ogame/install   # UTOPIA.DLL, UTOPIAWA.EXE, ACTORS\*.ACT, ...
 ```
 
-## Status: Bringup — engine + host run faithfully; MFC InitInstance reached ✅
+## Status: Bringup — OLE init + main window created; MFC InitInstance runs ✅
 
 All three modules lift to link-clean C. The recompiled **engine LibMain
 initializes cleanly** (`ax=0001`), the **host runs its full MFC AfxWinMain**,
@@ -110,14 +110,21 @@ The fixes that got here (see **[docs/BRINGUP.md](docs/BRINGUP.md)**):
    app did nothing. `scan_vtable_farptrs` now promotes them, so **InitInstance
    runs**.
 
-**Current frontier — OLE Automation.** InitInstance runs faithfully up to its
-first hard dependency: `seg002_7BEC` (an OLE Automation routine using
-`OLE2DISP` `SysAllocString`/etc.) returns an HRESULT error `0x8004792E` because
-OLE is stubbed, so MFC skips `Run()`/the message loop and the process exits.
-**Microsoft Bob is fundamentally an OLE Automation app** (an automation client
-over its Access/Jet data store), so the next milestone is an **OLE Automation
-shim subsystem** (COMPOBJ + OLE2DISP + IDispatch/typelib + a minimal class
-registry) — not another lifting fix. See docs/BRINGUP.md.
+**OLE init + window creation now work.** Implemented the COM/OLE bring-up shims
+(`CoBuildVersion`, `CoInitialize`, `OleInitialize`, `Catch`) and a cross-platform
+**headless window subsystem**: `CreateWindowEx` allocates a guest HWND and drives
+MFC's subclass-on-`WM_NCCREATE` through the captured `WH_CALLWNDPROC` hook, so the
+main window ("AfxFrameOrView" / "Daemon") is created and attached
+(`m_hWnd` set, added to MFC's HWND map).
+
+**Current frontier — engine OLE Automation vtables.** InitInstance now runs deep
+into Bob's OLE Automation init (`AfxOleInit`), which dispatches through OLE object
+vtables that live in the engine's *code* segments. Those engine vtables aren't
+promoted yet (the stride-4 promotion is gated to the host because the engine has
+jump-table false positives that, once promoted, recurse and crash init — a
+`ret`/`retf`-preceded guard now removes the loop-header class; other classes
+remain). Resolving engine vtable promotion is the next step to a running message
+loop. See docs/BRINGUP.md.
 
 ### How it lifts (the three modules → one program)
 
