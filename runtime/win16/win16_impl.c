@@ -665,6 +665,35 @@ void COMPOBJ_COUNINITIALIZE(CPU *cpu) {
     ret(cpu, 0);
 }
 
+/* HRESULT OleInitialize(LPMALLOC pMalloc) -> S_OK. One far-pointer arg (4 bytes).
+ * seg011_15D7 checks DX>=0 after this; a stubbed garbage DX failed it. */
+void OLE2_OLEINITIALIZE(CPU *cpu) {
+    cpu->dx = 0; cpu->ax = 0;             /* S_OK */
+    ret(cpu, 4);
+}
+
+/* void OleUninitialize(void). */
+void OLE2_OLEUNINITIALIZE(CPU *cpu) {
+    ret(cpu, 0);
+}
+
+/* int Catch(LPCATCHBUF lpCatchBuf): MSC/MFC exception setjmp. The auto-stub
+ * returned 0 but used the wrong purge (it left the 4-byte far-ptr arg on the
+ * stack), corrupting every frame after a TRY block. Save a minimal guest
+ * context into the CATCHBUF and return 0 on the initial call with the correct
+ * 4-byte purge. (Full Throw/longjmp isn't modelled in the flat C-call runtime;
+ * this covers the no-exception success path, which is what InitInstance hits.) */
+void KERNEL_CATCH(CPU *cpu) {
+    uint16_t bo = a16(cpu, 0), bs = a16(cpu, 2);   /* lpCatchBuf seg:off */
+    mem_write16(cpu, bs, (uint16_t)(bo + 0), cpu->bp);
+    mem_write16(cpu, bs, (uint16_t)(bo + 2), cpu->sp);
+    mem_write16(cpu, bs, (uint16_t)(bo + 4), cpu->si);
+    mem_write16(cpu, bs, (uint16_t)(bo + 6), cpu->di);
+    mem_write16(cpu, bs, (uint16_t)(bo + 8), cpu->ds);
+    cpu->ax = 0;                                   /* initial return (no throw) */
+    ret(cpu, 4);
+}
+
 /* ===== USER: headless window subsystem =====
  * Bob's MFC creates its main window (class "AfxFrameOrView") via CWnd::CreateEx,
  * which subclasses the new window through a WH_CALLWNDPROC hook:
