@@ -333,7 +333,6 @@ void USER_CREATEDIALOG(CPU *cpu) { (void)cpu; WIN16_LOG("CREATEDIALOG"); cpu->ax
 void USER_CREATEICON(CPU *cpu) { (void)cpu; WIN16_LOG("CREATEICON"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("CREATEICON"); }
 void USER_CREATEPOPUPMENU(CPU *cpu) { (void)cpu; WIN16_LOG("CREATEPOPUPMENU"); cpu->ax = 0; cpu->sp += 4 + 0; }
 void USER_CREATEWINDOW(CPU *cpu) { (void)cpu; WIN16_LOG("CREATEWINDOW"); cpu->ax = 0; cpu->sp += 4 + 30; }
-void USER_CREATEWINDOWEX(CPU *cpu) { (void)cpu; WIN16_LOG("CREATEWINDOWEX"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("CREATEWINDOWEX"); }
 void USER_DEFERWINDOWPOS(CPU *cpu) { (void)cpu; WIN16_LOG("DEFERWINDOWPOS"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("DEFERWINDOWPOS"); }
 void USER_DEFHOOKPROC(CPU *cpu) { (void)cpu; WIN16_LOG("DEFHOOKPROC"); cpu->ax = 0; cpu->sp += 4 + 0; }
 void USER_DEFWINDOWPROC(CPU *cpu) { (void)cpu; WIN16_LOG("DEFWINDOWPROC"); cpu->ax = 0; cpu->sp += 4 + 10; }
