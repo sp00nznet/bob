@@ -523,3 +523,27 @@ a `jmp`/fall-through). This cut host false positives 599->473 (host still builds
 the window identically) and removes the loop-header class. The engine still
 crashes with promotion enabled (other false-positive classes remain), so it
 stays gated to the host; the guard is the foundation for enabling it later.
+
+## Engine OLE vtable dispatch: surgical promotion (dispatch_far-miss based)
+
+Rather than the speculative stride-4 engine vtable promotion (which crashes init
+via false positives), promote the EXACT engine `call far [mem]` targets that MISS
+at runtime: build with -DELFISH_TRACE_RUNTIME, grep `dispatch_far MISS seg=N
+off=XXXX`, and force-promote those (FORCE_PROMOTE in lift_combined.py). Key
+constraints learned:
+- Only `dispatch_far` (indirect CALL) misses -- never `recomp_dispatch` (retf
+  return) misses, which are intentional sentinel returns.
+- Only HOST-phase misses (after "LibMain returned"). The engine's OWN OLE
+  IDispatch vtable (seg13 cluster: 588B/61D2/6747/6E36/770F/7B42/85BB/8756/88E9)
+  is dispatched during LibMain on objects not yet constructed; promoting those
+  runs them too early and crashes LibMain -- they must stay no-op misses.
+- scan_vtable_farptrs's is_fn_start now also (a) accepts a `jmp` terminator and
+  (b) rejects intra-segment jump targets, so it no longer needs the host gate to
+  avoid loop-header/return-address false positives.
+
+Result: all 4 host-phase engine OLE dispatches resolve (seg2:05E9 seg7:099E
+seg11:13EF seg13:681A); engine stays ax=0001; InitInstance advances 5236->5269
+calls. **But it still returns FALSE**: the OLE methods now RUN and return an
+0x8004xxxx error because Bob's OLE Automation runtime (IDispatch/type-library/
+BSTR/Jet data layer) isn't implemented -- the methods execute but fail. That OLE
+Automation subsystem is the real remaining work, not more lifting/promotion.

@@ -42,6 +42,18 @@ MODULES = [
     (G('UTOPIAWA', 'UTOPIAWA.EXE'), 30, 'utopiawa_ida.json'),
 ]
 
+# Exact engine `call far [mem]` (OLE/IDispatch vtable) targets that MISS at
+# runtime -- collected by building with -DELFISH_TRACE_RUNTIME and grepping
+# `dispatch_far MISS seg=N off=XXXX` (engine global segs 1-24, real offsets;
+# the off=FFFF sentinel misses are intentional returns and are excluded).
+# {global_seg: [offsets]}. Re-collect after each round as InitInstance advances.
+FORCE_PROMOTE = {
+    2:  [0x05E9],          # OLE IDispatch method (seg021_004B vtable+0xC)
+    7:  [0x099E],
+    11: [0x13EF],
+    13: [0x681A],
+}
+
 
 def offset_module(ne, offset):
     """Shift a module's segment indices and internal relocation targets."""
@@ -148,14 +160,48 @@ def scan_vtable_farptrs(ne, ida_off, min_run=3):
     code_idx = {s.index for s in ne.segments if s.is_code}
     seg_by_idx = {s.index: s for s in ne.segments}
 
+    _jt_cache = {}
+
+    def jump_targets(tseg):
+        """Set of offsets that are the target of an intra-segment Jcc/jmp/loop.
+        A genuine function entry is reached only via call/vtable, never by a
+        jump, so a stride-4 entry that IS a jump target is a mid-function
+        case/loop label (e.g. seg005_16EA, target of `je 16EA`) -- promoting it
+        splits the function and corrupts control flow."""
+        if tseg in _jt_cache:
+            return _jt_cache[tseg]
+        tg = seg_by_idx.get(tseg)
+        hs = ida_off.get(str(tseg), {}).get('heads')
+        tgt = set()
+        if tg and tg.data and hs:
+            d = tg.data; n = len(d)
+            def s8(b): return b - 256 if b >= 128 else b
+            def s16(lo, hi): v = lo | (hi << 8); return v - 65536 if v >= 32768 else v
+            for h in hs:
+                if h + 1 >= n:
+                    continue
+                op = d[h]
+                if op == 0xEB or 0x70 <= op <= 0x7F or 0xE0 <= op <= 0xE3:  # rel8 jmp/Jcc/loop/jcxz
+                    tgt.add((h + 2 + s8(d[h + 1])) & 0xFFFF)
+                elif op == 0xE9 and h + 2 < n:                              # jmp rel16
+                    tgt.add((h + 3 + s16(d[h + 1], d[h + 2])) & 0xFFFF)
+                elif op == 0x0F and h + 3 < n and 0x80 <= d[h + 1] <= 0x8F:  # Jcc rel16
+                    tgt.add((h + 4 + s16(d[h + 2], d[h + 3])) & 0xFFFF)
+        _jt_cache[tseg] = tgt
+        return tgt
+
     def is_fn_start(tseg, off):
-        """True only when `off` is a genuine function entry, i.e. the preceding
-        instruction is a RET/RETF (a vtable method is the byte after the prior
-        method's `retf`). This rejects stride-4 FALSE POSITIVES from far JUMP
-        TABLES, whose entries are mid-function case/loop labels reached by a
-        Jcc/jmp (e.g. seg005_16EA, a loop header preceded by `EB 0D` jmp) --
-        promoting those splits the loop and ne_lift turns the backward jump into
-        an infinite-recursing tail-call. Walk back over NOP/INT3 padding too."""
+        """True only when `off` is a genuine function entry: (1) the preceding
+        instruction is a terminator -- ret/retf or jmp (a vtable method starts
+        right after the prior method's `retf`, or after a tail `jmp`); a call
+        before it means `off` is a RETURN ADDRESS (skip), a non-terminator means
+        `off` is a fall-through mid-function label (skip). AND (2) `off` is not
+        an intra-segment jump target (which would make it a loop/case label).
+        Walk back over NOP/INT3 padding. This separates real vtable methods from
+        far JUMP-TABLE entries / loop headers / return addresses, all of which
+        corrupt the lift if split into their own function."""
+        if off in jump_targets(tseg):
+            return False
         tg = seg_by_idx.get(tseg)
         if not tg or not tg.data:
             return False
@@ -169,7 +215,8 @@ def scan_vtable_farptrs(ne, ida_off, min_run=3):
         d = tg.data
         for _ in range(8):                           # skip a little padding
             op = d[prev] if prev < len(d) else 0
-            if op in (0xC3, 0xCB, 0xC2, 0xCA):       # ret/retf [imm16]
+            if op in (0xC3, 0xCB, 0xC2, 0xCA,        # ret/retf [imm16]
+                      0xE9, 0xEB):                   # jmp rel16/rel8 (tail)
                 return True
             if op in (0x90, 0xCC):                   # nop / int3 padding
                 below = [h for h in hs if h < prev]
@@ -232,6 +279,16 @@ def build_ida_map(src_name, offset, ne):
     for src in srcs:
         for gseg, offs in src.items():
             extra.setdefault(gseg, set()).update(offs)
+    # Surgical engine promotions: exact `call far [mem]` (vtable/IDispatch)
+    # targets that MISS at runtime (collected via dispatch_far MISS logging),
+    # so the engine's OLE-Automation virtual dispatches resolve. Promoting only
+    # genuine indirect-CALL miss targets (never retf/return addresses, which go
+    # through recomp_dispatch) avoids the speculative stride-4 over-promotion
+    # that wandered/crashed engine init. Grows as InitInstance reaches deeper.
+    for gseg, offs in FORCE_PROMOTE.items():
+        if str(gseg) in off:
+            extra.setdefault(str(gseg), set()).update(
+                o for o in offs if o in set(off[str(gseg)].get('heads', [])))
     n = 0
     for gseg, offs in extra.items():
         funcs = set(off[gseg].get('functions', []))
