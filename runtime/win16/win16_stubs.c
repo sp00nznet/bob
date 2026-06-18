@@ -172,14 +172,8 @@ void KERNEL_ISBADREADPTR(CPU *cpu) { (void)cpu; WIN16_LOG("ISBADREADPTR"); cpu->
 void KERNEL_ISBADWRITEPTR(CPU *cpu) { (void)cpu; WIN16_LOG("ISBADWRITEPTR"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("ISBADWRITEPTR"); }
 void KERNEL_ISDBCSLEADBYTE(CPU *cpu) { (void)cpu; WIN16_LOG("ISDBCSLEADBYTE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("ISDBCSLEADBYTE"); }
 void KERNEL_ISTASK(CPU *cpu) { (void)cpu; WIN16_LOG("ISTASK"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("ISTASK"); }
-void KERNEL_LOCALALLOC(CPU *cpu) { (void)cpu; WIN16_LOG("LOCALALLOC"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("LOCALALLOC"); }
 void KERNEL_LOCALCOMPACT(CPU *cpu) { (void)cpu; WIN16_LOG("LOCALCOMPACT"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("LOCALCOMPACT"); }
-void KERNEL_LOCALFREE(CPU *cpu) { (void)cpu; WIN16_LOG("LOCALFREE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("LOCALFREE"); }
-void KERNEL_LOCALLOCK(CPU *cpu) { (void)cpu; WIN16_LOG("LOCALLOCK"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("LOCALLOCK"); }
-void KERNEL_LOCALREALLOC(CPU *cpu) { (void)cpu; WIN16_LOG("LOCALREALLOC"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("LOCALREALLOC"); }
 void KERNEL_LOCALSHRINK(CPU *cpu) { (void)cpu; WIN16_LOG("LOCALSHRINK"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("LOCALSHRINK"); }
-void KERNEL_LOCALSIZE(CPU *cpu) { (void)cpu; WIN16_LOG("LOCALSIZE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("LOCALSIZE"); }
-void KERNEL_LOCALUNLOCK(CPU *cpu) { (void)cpu; WIN16_LOG("LOCALUNLOCK"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("LOCALUNLOCK"); }
 void KERNEL_LOCKSEGMENT(CPU *cpu) { (void)cpu; WIN16_LOG("LOCKSEGMENT"); cpu->ax = 0; cpu->sp += 4 + 2; }
 void KERNEL_LSTRCAT(CPU *cpu) { (void)cpu; WIN16_LOG("LSTRCAT"); cpu->ax = 0; cpu->sp += 4 + 8; }
 void KERNEL_LSTRCPY(CPU *cpu) { (void)cpu; WIN16_LOG("LSTRCPY"); cpu->ax = 0; cpu->sp += 4 + 8; }
