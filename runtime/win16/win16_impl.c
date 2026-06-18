@@ -282,12 +282,76 @@ void WING_WINGSTRETCHBLT(CPU *cpu) {        /* WinGStretchBlt(...) -> BOOL (pres
  * kernel and returns nonzero on success. Borland's RTL near-malloc (used by
  * _setargv etc.) keys off this succeeding; a stub returning 0 made startup
  * report "Out of memory in _setargv". */
+/* ----- Local heap (LocalAlloc family) -----
+ * Bob GlobalAlloc's a segment, LocalInit's a heap region in it, then LocalAlloc's
+ * from it (the OLE/Jet layer leans on this; the auto-stub returned 0 = failure).
+ * Model a per-segment bump heap over the LocalInit'd [start,end). Handles are
+ * near offsets (LMEM_FIXED-style) so LocalLock returns the offset unchanged.
+ * Key by selector with the RPL/TI bits masked off. */
+#define LH_MAX 64
+static struct { uint16_t seg, next, end; } g_lheap[LH_MAX];
+static int g_lheap_n = 0;
+static int lheap_idx(uint16_t seg, int create) {
+    seg &= ~7u;
+    for (int i = 0; i < g_lheap_n; i++) if (g_lheap[i].seg == seg) return i;
+    if (create && g_lheap_n < LH_MAX) {
+        int i = g_lheap_n++; g_lheap[i].seg = seg;
+        g_lheap[i].next = 0x10; g_lheap[i].end = 0xFE00; return i;
+    }
+    return -1;
+}
+
 void KERNEL_LOCALINIT(CPU *cpu) {
     uint16_t uEnd = a16(cpu, 0), uStart = a16(cpu, 2), uSeg = a16(cpu, 4);
+    uint16_t seg = uSeg ? uSeg : cpu->ds;
+    int i = lheap_idx(seg, 1);
+    if (i >= 0) {
+        g_lheap[i].next = uStart ? uStart : 0x10;
+        g_lheap[i].end  = uEnd   ? uEnd   : 0xFE00;
+    }
     IMPL_LOG("[win16] LocalInit(seg=%04X, start=%04X, end=%04X) ds=%04X\n",
              uSeg, uStart, uEnd, cpu->ds);
     cpu->ax = 1;                            /* TRUE - heap initialized */
     ret(cpu, 6);
+}
+
+/* HLOCAL LocalAlloc(UINT uFlags, UINT uBytes): bump-allocate from cpu->ds's heap.
+ * PASCAL args: uFlags first (deepest), uBytes last -> a16(0)=uBytes, a16(2)=uFlags. */
+void KERNEL_LOCALALLOC(CPU *cpu) {
+    uint16_t bytes = a16(cpu, 0), flags = a16(cpu, 2);
+    int i = lheap_idx(cpu->ds, 1);
+    uint16_t h = 0;
+    if (i >= 0) {
+        uint16_t sz = (uint16_t)((bytes + 3u) & ~3u); if (sz < 4) sz = 4;
+        if ((uint32_t)g_lheap[i].next + sz <= g_lheap[i].end) {
+            h = g_lheap[i].next; g_lheap[i].next = (uint16_t)(g_lheap[i].next + sz);
+            if (flags & 0x40)                       /* LMEM_ZEROINIT */
+                for (uint16_t k = 0; k < sz; k++)
+                    mem_write8(cpu, cpu->ds, (uint16_t)(h + k), 0);
+        }
+    }
+    cpu->ax = h;                                    /* handle == near offset */
+    ret(cpu, 4);
+}
+
+void KERNEL_LOCALLOCK(CPU *cpu)  { cpu->ax = a16(cpu, 0); ret(cpu, 2); } /* fixed: handle is the ptr */
+void KERNEL_LOCALUNLOCK(CPU *cpu){ cpu->ax = 0; ret(cpu, 2); }
+void KERNEL_LOCALFREE(CPU *cpu)  { cpu->ax = 0; ret(cpu, 2); }           /* NULL == success */
+void KERNEL_LOCALSIZE(CPU *cpu)  { cpu->ax = 0; ret(cpu, 2); }
+void KERNEL_LOCALFLAGS(CPU *cpu) { cpu->ax = 0; ret(cpu, 2); }
+void KERNEL_LOCALHANDLE(CPU *cpu){ cpu->ax = a16(cpu, 0); ret(cpu, 2); }
+/* HLOCAL LocalReAlloc(HLOCAL h, UINT uBytes, UINT uFlags): just hand back a fresh block. */
+void KERNEL_LOCALREALLOC(CPU *cpu) {
+    uint16_t bytes = a16(cpu, 2);
+    int i = lheap_idx(cpu->ds, 1);
+    uint16_t h = 0;
+    if (i >= 0) {
+        uint16_t sz = (uint16_t)((bytes + 3u) & ~3u); if (sz < 4) sz = 4;
+        if ((uint32_t)g_lheap[i].next + sz <= g_lheap[i].end) {
+            h = g_lheap[i].next; g_lheap[i].next = (uint16_t)(g_lheap[i].next + sz);
+        }
+    }
+    cpu->ax = h; ret(cpu, 6);
 }
 
 /* ===== KERNEL: task startup =====
