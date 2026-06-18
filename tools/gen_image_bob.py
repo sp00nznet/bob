@@ -34,6 +34,7 @@ MODULES = [
     (G('UTOPIA.DLL'),               0),   # engine (base)
     (G('UEXTRA.DLL'),               24),  # blitter
     (G('UTOPIAWA', 'UTOPIAWA.EXE'), 30),  # host
+    (G('MSAJT110.DLL'),             40),  # Jet 1.1 database engine (41..146)
 ]
 
 

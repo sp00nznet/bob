@@ -45,7 +45,17 @@ def main():
     lines.append(' * Protected-mode NE selectors map to flat-memory bases at runtime.')
     lines.append(' * Placeholder: selector == NE segment index. Replace with a real')
     lines.append(' * selector->base table when the protected-mode memory model lands. */')
-    for n in range(1, 67):  # CATZDLL segs 1-59 + CATZ.WAD segs 60-66
+    # Cover every global segment present in the lift -- not just those with
+    # lifted functions, but also data segments whose selector is pushed in code
+    # (e.g. MSAJT110's DGROUP @146). Take the max of function-segs and any
+    # SEG_<n> referenced anywhere in src, plus headroom.
+    import re as _re
+    seg_ref = 0
+    for path in glob.glob(os.path.join(SRC, '*.c')):
+        for m in _re.findall(r'\bSEG_(\d+)\b', open(path, encoding='utf-8', errors='replace').read()):
+            seg_ref = max(seg_ref, int(m))
+    max_seg = max([int(k[3:]) for k in funcs_by_seg] + [seg_ref, 66])
+    for n in range(1, max_seg + 2):
         lines.append(f'#define SEG_{n} ((uint16_t){n})')
     lines.append('')
 
