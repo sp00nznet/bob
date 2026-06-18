@@ -157,13 +157,29 @@ int main(int argc, char *argv[])
      *    accesses DGROUP globals via ss:[abs] (small-model SS==DS==DGROUP), so
      *    run it with SS=DS=engine DGROUP (now allocated a full 64 KB so the
      *    stack at sp=0xFFFE and the statics at the bottom share one segment). */
+#ifdef BOB_WATCHDOG
+    CreateThread(NULL, 0, watchdog_thread, NULL, 0, NULL);
+#endif
+
+    /* 0.5) MSAJT110 (the Jet 1.1 database engine) is a DEPENDENCY of UTOPIA, so
+     *      Windows loads + initializes it BEFORE UTOPIA's LibMain. Mirror that:
+     *      run its NE entry (seg45:0 = LibEntry -> Jet C-runtime + LibMain) with
+     *      SS=DS=its DGROUP (seg146, full 64 KB) first. LibEntry convention:
+     *      DI=hInstance, DS=auto-data, CX=heap, ES:SI=lpszCmdLine. */
+    cpu.ds = cpu.es = 146;
+    cpu.ss = 146; cpu.sp = 0xFFFE;
+    cpu.di = 146; cpu.cx = 0; cpu.si = 0;
+    cpu.cs = 45;
+    unsigned callsJ = g_fn_ring_pos;
+    seg045_0000(&cpu);                      /* MSAJT110 LibEntry (seg45:0) */
+    printf("MSAJT110 LibMain returned (ax=%04X) after %u lifted calls\n",
+           cpu.ax, g_fn_ring_pos - callsJ);
+    fflush(stdout);
+
     cpu.ds = cpu.es = CATZ_DLL_AUTO_DATA_SEG;
     cpu.ss = CATZ_DLL_AUTO_DATA_SEG;
     cpu.sp = 0xFFFE;
     cpu.cs = CATZ_DLL_ENTRY_SEG;
-#ifdef BOB_WATCHDOG
-    CreateThread(NULL, 0, watchdog_thread, NULL, 0, NULL);
-#endif
     unsigned calls0 = g_fn_ring_pos;
     seg005_120D(&cpu);                      /* UTOPIA LibMain (seg5:0x120D) */
     printf("UTOPIA LibMain returned (ax=%04X) after %u lifted calls\n",
