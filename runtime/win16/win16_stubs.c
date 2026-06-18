@@ -166,6 +166,9 @@ void KERNEL_GETPROCADDRESS(CPU *cpu) { (void)cpu; WIN16_LOG("GETPROCADDRESS"); c
 void KERNEL_GETPROFILEINT(CPU *cpu) { (void)cpu; WIN16_LOG("GETPROFILEINT"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("GETPROFILEINT"); }
 void KERNEL_GETPROFILESTRING(CPU *cpu) { (void)cpu; WIN16_LOG("GETPROFILESTRING"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("GETPROFILESTRING"); }
 void KERNEL_GETTEMPDRIVE(CPU *cpu) { (void)cpu; WIN16_LOG("GETTEMPDRIVE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("GETTEMPDRIVE"); }
+void KERNEL_GETTEMPFILENAME(CPU *cpu) { (void)cpu; WIN16_LOG("GETTEMPFILENAME"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("GETTEMPFILENAME"); }
+void KERNEL_GLOBALDOSALLOC(CPU *cpu) { (void)cpu; WIN16_LOG("GLOBALDOSALLOC"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("GLOBALDOSALLOC"); }
+void KERNEL_GLOBALDOSFREE(CPU *cpu) { (void)cpu; WIN16_LOG("GLOBALDOSFREE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("GLOBALDOSFREE"); }
 void KERNEL_GLOBALFLAGS(CPU *cpu) { (void)cpu; WIN16_LOG("GLOBALFLAGS"); cpu->ax = 0; cpu->sp += 4 + 2; }
 void KERNEL_ISBADCODEPTR(CPU *cpu) { (void)cpu; WIN16_LOG("ISBADCODEPTR"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("ISBADCODEPTR"); }
 void KERNEL_ISBADREADPTR(CPU *cpu) { (void)cpu; WIN16_LOG("ISBADREADPTR"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("ISBADREADPTR"); }
@@ -215,6 +218,14 @@ void MSABC110_B_FPSIGNAL(CPU *cpu) { (void)cpu; WIN16_LOG("B$FPSIGNAL"); cpu->ax
 void MSABC110_EBTERM(CPU *cpu) { (void)cpu; WIN16_LOG("EBTERM"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("EBTERM"); }
 void MSABC110_ERREBINIT(CPU *cpu) { (void)cpu; WIN16_LOG("ERREBINIT"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("ERREBINIT"); }
 void MSABC110_ERREBINITDGROUP(CPU *cpu) { (void)cpu; WIN16_LOG("ERREBINITDGROUP"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("ERREBINITDGROUP"); }
+
+/* ===== MSAES110 ===== */
+void MSAES110_BINDEXPR(CPU *cpu) { (void)cpu; WIN16_LOG("BINDEXPR"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("BINDEXPR"); }
+void MSAES110_ERREVALHTTE(CPU *cpu) { (void)cpu; WIN16_LOG("ERREVALHTTE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("ERREVALHTTE"); }
+void MSAES110_FDECODEHTTE(CPU *cpu) { (void)cpu; WIN16_LOG("FDECODEHTTE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("FDECODEHTTE"); }
+void MSAES110_FWILDLPSTR(CPU *cpu) { (void)cpu; WIN16_LOG("FWILDLPSTR"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("FWILDLPSTR"); }
+void MSAES110_HTTEPARSEEXPR(CPU *cpu) { (void)cpu; WIN16_LOG("HTTEPARSEEXPR"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("HTTEPARSEEXPR"); }
+void MSAES110_LPSZOFDFI(CPU *cpu) { (void)cpu; WIN16_LOG("LPSZOFDFI"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("LPSZOFDFI"); }
 
 /* ===== MSAJT110 ===== */
 void MSAJT110_MSAJT110_101(CPU *cpu) { (void)cpu; WIN16_LOG("MSAJT110_101"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("MSAJT110_101"); }

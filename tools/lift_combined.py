@@ -36,10 +36,15 @@ os.makedirs(SRC, exist_ok=True)
 G = lambda *p: os.path.join(ROOT, 'game', 'install', *p)
 
 # (path, seg_offset, ida_json)
+#   UTOPIA 1..24, UEXTRA 25..27, UTOPIAWA 31..40, MSAJT110 41..146 (104 code +
+#   2 data). MSAJT110 = the real Jet 1.1 database engine; the engine accesses
+#   its Access .MDB data through it (DAO/CDatabase -> the Jet stack-switching
+#   thunk). Lifting it faithfully (vs faking) reads the real databases.
 MODULES = [
     (G('UTOPIA.DLL'),            0,  'utopia_ida.json'),
     (G('UEXTRA.DLL'),            24, 'uextra_ida.json'),
     (G('UTOPIAWA', 'UTOPIAWA.EXE'), 30, 'utopiawa_ida.json'),
+    (G('MSAJT110.DLL'),          40, 'msajt110_ida.json'),
 ]
 
 # Exact engine `call far [mem]` (OLE/IDispatch vtable) targets that MISS at
@@ -309,6 +314,13 @@ def main():
     engine = parse_ne(MODULES[0][0])
     xmod = {'UTOPIA': {e.ordinal: (e.segment, e.offset) for e in engine.entries}}
     print(f"UTOPIA export entries: {len(xmod['UTOPIA'])}")
+    # MSAJT110 (Jet) export table -> xmod so the engine's MSAJT110 imports (by
+    # name+ordinal) resolve to direct calls into the lifted Jet code. Segments
+    # are global (MSAJT110 is offset by its MODULES entry).
+    jt_path, jt_off = next((p, o) for p, o, _ in MODULES if 'MSAJT110' in p)
+    jt_ne = parse_ne(jt_path)
+    xmod['MSAJT110'] = {e.ordinal: (e.segment + jt_off, e.offset) for e in jt_ne.entries}
+    print(f"MSAJT110 export entries: {len(xmod['MSAJT110'])}")
 
     total = 0
     for path, offset, ida in MODULES:
