@@ -38,6 +38,13 @@ void dump_fn_ring(int n);
 void catz_sp_check(const char *nm);
 #define TRACE_FN(n) do { g_fn_ring[(g_fn_ring_pos++) & (CATZ_FN_RING_SIZE-1)] = (n); \
     catz_sp_check(n); } while (0)
+#elif defined(CATZ_WATCH_DS)
+/* Function-entry DS-watch: prints the first function entered with ds==target
+ * (default 0xFFFF) plus a backtrace — pinpoints where a bad segment first
+ * lands in DS. Set CATZ_WATCH_DS to the target value. Defined in main.c. */
+void catz_ds_check(const char *nm);
+#define TRACE_FN(n) do { g_fn_ring[(g_fn_ring_pos++) & (CATZ_FN_RING_SIZE-1)] = (n); \
+    catz_ds_check(n); } while (0)
 #elif defined(CATZ_TRACE_FN)
 #define TRACE_FN(n) do { g_fn_ring[(g_fn_ring_pos++) & (CATZ_FN_RING_SIZE-1)] = (n); \
     fprintf(stderr, "FN %s\n", (n)); } while (0)

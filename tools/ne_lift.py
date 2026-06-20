@@ -206,13 +206,30 @@ class NELifter(Lifter):
         # the lifted CODE uses the immediate directly, so resolve it here.
         # Covers taking the address of a function/data (incl. cross-module, e.g.
         # a CATZDLL export's offset/selector stored as a WAD callback pointer).
-        if m == 'mov' and op2 and op2.type in (OpType.IMM8, OpType.IMM16):
+        if m == 'mov' and op2 and op2.type in (OpType.IMM8, OpType.IMM16, OpType.IMM32):
             for off in range(local_off + 1, local_off + inst.length):
                 ann = self._get_reloc_at(off)
                 if not ann:
                     continue
                 r = ann.reloc
                 tt = r.flags & 3
+                if r.src_type == 3:        # POINTER32 (full far ptr seg:off in a 32-bit imm)
+                    # `mov eax, <far ptr to symbol>` -- e.g. a far ptr to an
+                    # MSAJT110/MSABC110 Jet function loaded into EAX and handed to
+                    # the stack-switch thunk. Without this the placeholder
+                    # 0xSSSSFFFF is used and the thunk dispatches to garbage.
+                    if tt == 0:
+                        self._emit(_write(op1, f'(((uint32_t)SEG_{r.target_seg}) << 16) | 0x{r.target_off & 0xFFFF:04X}'),
+                                   f'{orig} -- far ptr seg{r.target_seg}:{r.target_off:04X}')
+                        return
+                    elif tt in (1, 2):
+                        mod = module_name(self.ne, r.module_idx)
+                        xm = self.xmod.get(mod.upper())
+                        if xm and r.ordinal in xm:
+                            s, o = xm[r.ordinal]
+                            self._emit(_write(op1, f'(((uint32_t)SEG_{s}) << 16) | 0x{o & 0xFFFF:04X}'),
+                                       f'{orig} -- far ptr {mod}.{r.ordinal}')
+                            return
                 if r.src_type == 2:        # SELECTOR (segment of a symbol)
                     if tt == 0:
                         self._emit(_write(op1, f'SEG_{r.target_seg}'),
@@ -267,6 +284,17 @@ class NELifter(Lifter):
                     self._emit(f'push16(cpu, 0x{r.target_off & 0xFFFF:04X});',
                                f'{orig} -- offset of seg{r.target_seg}:{r.target_off:04X}')
                     return
+                if r.src_type == 5 and tt in (1, 2):            # cross-module import OFFSET
+                    # `push offset <import>` (e.g. a far ptr to an MSABC110/MSAJT110
+                    # Jet/EB function handed to the stack-switch thunk). Without this
+                    # the placeholder 0xFFFF is pushed and the thunk dispatches to
+                    # seg:FFFF (garbage) -> the Daemon's EB query fails.
+                    mod = module_name(self.ne, r.module_idx)
+                    xm = self.xmod.get(mod.upper())
+                    if xm and r.ordinal in xm:
+                        self._emit(f'push16(cpu, 0x{xm[r.ordinal][1] & 0xFFFF:04X});',
+                                   f'{orig} -- offset of {mod}.{r.ordinal}')
+                        return
 
         # --- Default: delegate to base lifter ---
         super().lift_instruction(inst, func_start)

@@ -26,6 +26,7 @@ from win16 import get_import, module_name, get_purge
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 IMPL_FILES = [os.path.join(ROOT, 'runtime', 'win16', 'win16_impl.c'),
+              os.path.join(ROOT, 'runtime', 'win16', 'win16_file.c'),
               os.path.join(ROOT, 'runtime', 'win16', 'win32_backend.c')]
 
 
