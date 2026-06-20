@@ -35,6 +35,8 @@ MODULES = [
     (G('UEXTRA.DLL'),               24),  # blitter
     (G('UTOPIAWA', 'UTOPIAWA.EXE'), 30),  # host
     (G('MSAJT110.DLL'),             40),  # Jet 1.1 database engine (41..146)
+    (G('MSABC110.DLL'),             146), # Access Basic runtime (147..219, no DGROUP)
+    (G('MSAES110.DLL'),             219), # Access Expression Service (220..227)
 ]
 
 

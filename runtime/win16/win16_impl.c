@@ -490,11 +490,56 @@ static void write_rect(CPU *cpu, uint16_t seg, uint16_t off, int l, int t, int r
     mem_write16(cpu, seg, (uint16_t)(off + 6), (uint16_t)b);
 }
 
-/* RegisterClass returns a non-zero ATOM on success (0 = failure). The stub
- * returned 0, so the engine/host treated every class registration as failed and
- * aborted init. Hand back a unique non-zero atom per call. */
+/* ===== window class registry + per-window state (real WndProc dispatch) =====
+ * Each RegisterClass stores the class WndProc + cbWndExtra under a unique atom.
+ * Each window tracks its WndProc (GWL_WNDPROC, which MFC re-points to AfxWndProc
+ * via SetWindowLong during the WM_NCCREATE subclass), userdata, style and extra
+ * bytes. CreateWindowEx then drives WM_NCCREATE + WM_CREATE through the WndProc
+ * so CWnd::OnCreate runs (builds the frame's view, etc.). */
+#define MAXCLS 128
+static struct { char name[64]; uint16_t atom, wp_seg, wp_off, cbWndExtra; int used; } g_cls[MAXCLS];
+#define MAXWIN 512
+static struct {
+    uint16_t hwnd, wp_seg, wp_off, parent, hmenu, hinst, atom;
+    uint32_t userdata, style;
+    uint8_t  extra[64];
+    int used;
+} g_win[MAXWIN];
+
+static int win_find(uint16_t hwnd) {
+    for (int i = 0; i < MAXWIN; i++) if (g_win[i].used && g_win[i].hwnd == hwnd) return i;
+    return -1;
+}
+static int cls_find_atom(uint16_t atom) {
+    for (int i = 0; i < MAXCLS; i++) if (g_cls[i].used && g_cls[i].atom == atom) return i;
+    return -1;
+}
+static int cls_find_name(const char *n) {
+    for (int i = 0; i < MAXCLS; i++) if (g_cls[i].used && !strcmp(g_cls[i].name, n)) return i;
+    return -1;
+}
+
+/* RegisterClass(lpWndClass): WNDCLASS{style@0,lpfnWndProc@2(far),cbClsExtra@6,
+ * cbWndExtra@8,hInstance@A,...,lpszClassName@16(far)}. Returns a non-zero atom. */
 void USER_REGISTERCLASS(CPU *cpu) {
     static uint16_t atom = 0xC001;
+    uint16_t wc_o = a16(cpu, 0), wc_s = a16(cpu, 2);
+    uint16_t wp_off = mem_read16(cpu, wc_s, (uint16_t)(wc_o + 2));
+    uint16_t wp_seg = mem_read16(cpu, wc_s, (uint16_t)(wc_o + 4));
+    uint16_t cbwe   = mem_read16(cpu, wc_s, (uint16_t)(wc_o + 8));
+    uint16_t cn_o   = mem_read16(cpu, wc_s, (uint16_t)(wc_o + 0x16));
+    uint16_t cn_s   = mem_read16(cpu, wc_s, (uint16_t)(wc_o + 0x18));
+    char name[64] = ""; read_asciiz(cpu, cn_s, cn_o, name, sizeof name);
+    int i = cls_find_name(name);
+    if (i < 0) for (i = 0; i < MAXCLS; i++) if (!g_cls[i].used) break;
+    if (i < MAXCLS) {
+        g_cls[i].used = 1; g_cls[i].atom = atom;
+        snprintf(g_cls[i].name, sizeof g_cls[i].name, "%s", name);
+        g_cls[i].wp_seg = wp_seg; g_cls[i].wp_off = wp_off;
+        g_cls[i].cbWndExtra = cbwe > 64 ? 64 : cbwe;
+    }
+    IMPL_LOG("[win16] RegisterClass '%s' wndproc=%04X:%04X cbWndExtra=%u -> atom=%04X\n",
+             name, wp_seg, wp_off, cbwe, atom);
     cpu->ax = atom++;
     if (atom == 0) atom = 0xC001;
     ret(cpu, 4);
@@ -789,39 +834,211 @@ static uint16_t call_guest(CPU *cpu, uint16_t seg, uint16_t off,
 }
 
 static uint16_t g_cwp_sel = 0;          /* scratch selector for the CWPSTRUCT */
+static uint16_t g_cs_sel = 0;           /* scratch selector for the CREATESTRUCT */
 static uint16_t g_next_hwnd = 0x1000;   /* handed-out guest HWNDs */
+
+/* Send a message to a window: first replay it through the WH_CALLWNDPROC hook
+ * (MFC's _AfxCallWndProc attaches the CWnd on WM_NCCREATE and may re-point the
+ * WndProc to AfxWndProc via SetWindowLong), then call the window's current
+ * WndProc. Returns the WndProc's LRESULT (low word). */
+static uint32_t send_message(CPU *cpu, uint16_t hwnd, uint16_t msg,
+                             uint16_t wParam, uint32_t lParam) {
+    if (have_hook(4)) {                              /* WH_CALLWNDPROC */
+        if (!g_cwp_sel) g_cwp_sel = galloc(cpu, 16);
+        if (g_cwp_sel) {
+            mem_write32(cpu, g_cwp_sel, 0, lParam);  /* CWPSTRUCT.lParam */
+            mem_write16(cpu, g_cwp_sel, 4, wParam);
+            mem_write16(cpu, g_cwp_sel, 6, msg);
+            mem_write16(cpu, g_cwp_sel, 8, hwnd);
+            uint16_t a[4] = { 0, 0, g_cwp_sel, 0 };  /* nCode, wParam, lParam=CWPSTRUCT */
+            call_guest(cpu, g_hook[5].seg, g_hook[5].off, a, 4);
+        }
+    }
+    int wi = win_find(hwnd);
+    if (wi < 0 || !g_win[wi].wp_seg) return 0;
+    /* WndProc(HWND,UINT,WPARAM,LPARAM): push hwnd,msg,wParam,lParamHi,lParamLo */
+    uint16_t a[5] = { hwnd, msg, wParam,
+                      (uint16_t)(lParam >> 16), (uint16_t)(lParam & 0xFFFF) };
+    return call_guest(cpu, g_win[wi].wp_seg, g_win[wi].wp_off, a, 5);
+}
 
 /* HWND CreateWindowEx(dwExStyle,lpClassName,lpWindowName,dwStyle,x,y,w,h,
  *   hWndParent,hMenu,hInstance,lpParam) = 34 arg bytes (PASCAL). */
 void USER_CREATEWINDOWEX(CPU *cpu) {
     uint16_t cls_o = a16(cpu, 26), cls_s = a16(cpu, 28);
     uint16_t ttl_o = a16(cpu, 22), ttl_s = a16(cpu, 24);
+    uint32_t style = a16(cpu, 18) | ((uint32_t)a16(cpu, 20) << 16);
+    uint16_t hparent = a16(cpu, 8), hmenu = a16(cpu, 6), hinst = a16(cpu, 4);
+    uint16_t lpp_o = a16(cpu, 0), lpp_s = a16(cpu, 2);
     char cls[64] = "?", ttl[128] = "";
     if (cls_s == 0) snprintf(cls, sizeof cls, "#atom%04X", cls_o);
     else read_asciiz(cpu, cls_s, cls_o, cls, sizeof cls);
     if (ttl_s) read_asciiz(cpu, ttl_s, ttl_o, ttl, sizeof ttl);
 
     uint16_t hwnd = g_next_hwnd; g_next_hwnd += 4;
-    IMPL_LOG("[win16] CreateWindowEx class='%s' title='%s' -> hwnd=%04X\n",
-             cls, ttl, hwnd);
+    IMPL_LOG("[win16] CreateWindowEx class='%s' title='%s' -> hwnd=%04X\n", cls, ttl, hwnd);
 
-    /* Drive MFC's subclass: deliver WM_NCCREATE via the WH_CALLWNDPROC hook so
-     * _AfxCallWndProc attaches the CWnd (m_hWnd=hwnd) and clears pWndInit. The
-     * hook reads a CWPSTRUCT {lParam@0, wParam@4, message@6, hwnd@8}; HookProc
-     * args are (int nCode, WPARAM wParam, LPARAM lParam). */
-    if (have_hook(4)) {                              /* WH_CALLWNDPROC */
-        if (!g_cwp_sel) g_cwp_sel = galloc(cpu, 16);
-        if (g_cwp_sel) {
-            mem_write32(cpu, g_cwp_sel, 0, 0);       /* lParam (CREATESTRUCT) */
-            mem_write16(cpu, g_cwp_sel, 4, 0);       /* wParam */
-            mem_write16(cpu, g_cwp_sel, 6, 0x0081);  /* message = WM_NCCREATE */
-            mem_write16(cpu, g_cwp_sel, 8, hwnd);    /* hwnd */
-            uint16_t args[4] = { 0,              /* nCode = HC_ACTION */
-                                 0,              /* wParam */
-                                 g_cwp_sel, 0 }; /* lParam = CWPSTRUCT seg:off */
-            call_guest(cpu, g_hook[5].seg, g_hook[5].off, args, 4);
-        }
+    int ci = (cls_s == 0) ? cls_find_atom(cls_o) : cls_find_name(cls);
+    int wi; for (wi = 0; wi < MAXWIN; wi++) if (!g_win[wi].used) break;
+    if (wi >= MAXWIN) { cpu->ax = hwnd; ret(cpu, 34); return; }
+    memset(&g_win[wi], 0, sizeof g_win[wi]);
+    g_win[wi].used = 1; g_win[wi].hwnd = hwnd;
+    g_win[wi].parent = hparent; g_win[wi].hmenu = hmenu; g_win[wi].hinst = hinst;
+    g_win[wi].style = style;
+    if (ci >= 0) { g_win[wi].wp_seg = g_cls[ci].wp_seg; g_win[wi].wp_off = g_cls[ci].wp_off;
+                   g_win[wi].atom = g_cls[ci].atom; }
+
+    /* CREATESTRUCT for WM_NCCREATE/WM_CREATE lParam: lpCreateParams@0,hInstance@4,
+     * hMenu@6,hwndParent@8,cy@A,cx@C,y@E,x@10,style@12,lpszName@16,lpszClass@1A,
+     * dwExStyle@1E. */
+    if (!g_cs_sel) g_cs_sel = galloc(cpu, 40);
+    uint16_t cs = g_cs_sel;
+    if (cs) {
+        mem_write16(cpu, cs, 0, lpp_o); mem_write16(cpu, cs, 2, lpp_s);
+        mem_write16(cpu, cs, 4, hinst); mem_write16(cpu, cs, 6, hmenu);
+        mem_write16(cpu, cs, 8, hparent);
+        mem_write16(cpu, cs, 0xA, a16(cpu, 10)); mem_write16(cpu, cs, 0xC, a16(cpu, 12));
+        mem_write16(cpu, cs, 0xE, a16(cpu, 14)); mem_write16(cpu, cs, 0x10, a16(cpu, 16));
+        mem_write32(cpu, cs, 0x12, style);
+        mem_write16(cpu, cs, 0x16, ttl_o); mem_write16(cpu, cs, 0x18, ttl_s);
+        mem_write16(cpu, cs, 0x1A, cls_o); mem_write16(cpu, cs, 0x1C, cls_s);
+        mem_write32(cpu, cs, 0x1E, a16(cpu, 30) | ((uint32_t)a16(cpu, 32) << 16));
+    }
+    uint32_t lpcs = (uint32_t)cs << 16;             /* far ptr cs:0 */
+
+    /* WM_NCCREATE (subclass attaches CWnd) then WM_CREATE (-> CWnd::OnCreate). */
+    uint32_t nc = send_message(cpu, hwnd, 0x0081 /*WM_NCCREATE*/, 0, lpcs);
+    (void)nc;
+    uint32_t cr = send_message(cpu, hwnd, 0x0001 /*WM_CREATE*/, 0, lpcs);
+    if ((int16_t)(uint16_t)cr == -1) {              /* OnCreate failed -> no window */
+        IMPL_LOG("[win16]   WM_CREATE returned -1 (OnCreate failed) hwnd=%04X\n", hwnd);
+        g_win[wi].used = 0;
+        cpu->ax = 0; ret(cpu, 34); return;
     }
     cpu->ax = hwnd;
     ret(cpu, 34);
+}
+
+/* LONG SetWindowLong(HWND,int idx,LONG val): GWL_WNDPROC(-4),GWL_STYLE(-16),
+ * GWL_EXSTYLE(-20),GWL_USERDATA(-21),idx>=0 -> cbWndExtra bytes. */
+void USER_SETWINDOWLONG(CPU *cpu) {
+    uint32_t val = a16(cpu, 0) | ((uint32_t)a16(cpu, 2) << 16);
+    int16_t idx = (int16_t)a16(cpu, 4);
+    uint16_t hwnd = a16(cpu, 6);
+    int wi = win_find(hwnd); uint32_t prev = 0;
+    if (wi >= 0) {
+        if (idx == -4) { prev = ((uint32_t)g_win[wi].wp_seg << 16) | g_win[wi].wp_off;
+                         g_win[wi].wp_off = (uint16_t)val; g_win[wi].wp_seg = (uint16_t)(val >> 16); }
+        else if (idx == -21) { prev = g_win[wi].userdata; g_win[wi].userdata = val; }
+        else if (idx == -16) { prev = g_win[wi].style;    g_win[wi].style = val; }
+        else if (idx >= 0 && idx + 4 <= 64) {
+            prev = g_win[wi].extra[idx] | (g_win[wi].extra[idx+1]<<8)
+                 | ((uint32_t)g_win[wi].extra[idx+2]<<16) | ((uint32_t)g_win[wi].extra[idx+3]<<24);
+            g_win[wi].extra[idx]=val; g_win[wi].extra[idx+1]=val>>8;
+            g_win[wi].extra[idx+2]=val>>16; g_win[wi].extra[idx+3]=val>>24;
+        }
+    }
+    cpu->ax = (uint16_t)prev; cpu->dx = (uint16_t)(prev >> 16);
+    ret(cpu, 8);
+}
+void USER_GETWINDOWLONG(CPU *cpu) {
+    int16_t idx = (int16_t)a16(cpu, 0); uint16_t hwnd = a16(cpu, 2);
+    int wi = win_find(hwnd); uint32_t v = 0;
+    if (wi >= 0) {
+        if (idx == -4) v = ((uint32_t)g_win[wi].wp_seg << 16) | g_win[wi].wp_off;
+        else if (idx == -21) v = g_win[wi].userdata;
+        else if (idx == -16) v = g_win[wi].style;
+        else if (idx >= 0 && idx + 4 <= 64)
+            v = g_win[wi].extra[idx] | (g_win[wi].extra[idx+1]<<8)
+              | ((uint32_t)g_win[wi].extra[idx+2]<<16) | ((uint32_t)g_win[wi].extra[idx+3]<<24);
+    }
+    cpu->ax = (uint16_t)v; cpu->dx = (uint16_t)(v >> 16);
+    ret(cpu, 4);
+}
+/* WORD SetWindowWord/GetWindowWord(HWND,int idx[,WORD]): extra bytes as words. */
+void USER_SETWINDOWWORD(CPU *cpu) {
+    uint16_t val = a16(cpu, 0); int16_t idx = (int16_t)a16(cpu, 2); uint16_t hwnd = a16(cpu, 4);
+    int wi = win_find(hwnd); uint16_t prev = 0;
+    if (wi >= 0 && idx >= 0 && idx + 2 <= 64) {
+        prev = g_win[wi].extra[idx] | (g_win[wi].extra[idx+1]<<8);
+        g_win[wi].extra[idx] = (uint8_t)val; g_win[wi].extra[idx+1] = (uint8_t)(val>>8);
+    }
+    cpu->ax = prev; ret(cpu, 6);
+}
+void USER_GETWINDOWWORD(CPU *cpu) {
+    int16_t idx = (int16_t)a16(cpu, 0); uint16_t hwnd = a16(cpu, 2);
+    int wi = win_find(hwnd); uint16_t v = 0;
+    if (wi >= 0 && idx >= 0 && idx + 2 <= 64) v = g_win[wi].extra[idx] | (g_win[wi].extra[idx+1]<<8);
+    cpu->ax = v; ret(cpu, 4);
+}
+/* DefWindowProc(HWND,msg,wParam,lParam): minimal defaults. */
+void USER_DEFWINDOWPROC(CPU *cpu) {
+    uint16_t msg = a16(cpu, 6);
+    uint16_t r = (msg == 0x0081) ? 1 : 0;   /* WM_NCCREATE -> TRUE; else 0 */
+    cpu->ax = r; cpu->dx = 0;
+    ret(cpu, 10);
+}
+/* LRESULT SendMessage(HWND,msg,wParam,lParam): dispatch to the WndProc. */
+void USER_SENDMESSAGE(CPU *cpu) {
+    uint32_t lParam = a16(cpu, 0) | ((uint32_t)a16(cpu, 2) << 16);
+    uint16_t wParam = a16(cpu, 4), msg = a16(cpu, 6), hwnd = a16(cpu, 8);
+    uint32_t r = send_message(cpu, hwnd, msg, wParam, lParam);
+    cpu->ax = (uint16_t)r; cpu->dx = (uint16_t)(r >> 16);
+    ret(cpu, 10);
+}
+void USER_DESTROYWINDOW(CPU *cpu) {
+    uint16_t hwnd = a16(cpu, 0);
+    int wi = win_find(hwnd);
+    if (wi >= 0) { send_message(cpu, hwnd, 0x0002 /*WM_DESTROY*/, 0, 0); g_win[wi].used = 0; }
+    cpu->ax = 1; ret(cpu, 2);
+}
+void USER_SHOWWINDOW(CPU *cpu) { cpu->ax = 0; ret(cpu, 4); }
+
+/* int FAR cdecl wsprintf(LPSTR lpOut, LPCSTR lpFmt, ...). Caller cleans the
+ * varargs (cdecl) so we only pop the return address. Renders enough of the
+ * format to surface the message (Bob logs errors here). */
+void USER__WSPRINTF(CPU *cpu) {
+    uint16_t out_o = a16(cpu, 0), out_s = a16(cpu, 2);
+    uint16_t fmt_o = a16(cpu, 4), fmt_s = a16(cpu, 6);
+    char fmt[256]; read_asciiz(cpu, fmt_s, fmt_o, fmt, sizeof fmt);
+    char out[512]; int oi = 0, ai = 8;
+    for (int i = 0; fmt[i] && oi < 500; i++) {
+        if (fmt[i] != '%') { out[oi++] = fmt[i]; continue; }
+        i++;
+        while (fmt[i] && (fmt[i]=='-'||fmt[i]=='+'||fmt[i]==' '||fmt[i]=='#'||fmt[i]=='0'
+               || (fmt[i]>='1'&&fmt[i]<='9') || fmt[i]=='.')) i++;  /* skip flags/width */
+        int lng = 0; if (fmt[i]=='l') { lng = 1; i++; }
+        char sp = fmt[i]; char tmp[300]; tmp[0]=0;
+        if (sp == 's') {
+            uint16_t s_o=a16(cpu,ai), s_s=a16(cpu,ai+2); ai+=4;
+            read_asciiz(cpu, s_s, s_o, tmp, sizeof tmp);
+        } else if (sp=='d'||sp=='i'||sp=='u'||sp=='x'||sp=='X'||sp=='o'||sp=='c') {
+            int32_t v;
+            if (lng) { v=(int32_t)(a16(cpu,ai)|((uint32_t)a16(cpu,ai+2)<<16)); ai+=4; }
+            else { v=(sp=='d'||sp=='i')?(int16_t)a16(cpu,ai):a16(cpu,ai); ai+=2; }
+            if (sp=='x') snprintf(tmp,sizeof tmp,"%x",(unsigned)v);
+            else if (sp=='X') snprintf(tmp,sizeof tmp,"%X",(unsigned)v);
+            else if (sp=='u') snprintf(tmp,sizeof tmp,"%u",(unsigned)v);
+            else if (sp=='o') snprintf(tmp,sizeof tmp,"%o",(unsigned)v);
+            else if (sp=='c') { tmp[0]=(char)v; tmp[1]=0; }
+            else snprintf(tmp,sizeof tmp,"%d",(int)v);
+        } else { tmp[0]='%'; tmp[1]=sp; tmp[2]=0; }
+        for (int k=0; tmp[k] && oi<500; k++) out[oi++]=tmp[k];
+    }
+    out[oi]=0;
+    for (int k=0; k<=oi; k++) mem_write8(cpu, out_s, (uint16_t)(out_o+k), (uint8_t)out[k]);
+    IMPL_LOG("[win16] wsprintf -> \"%s\"\n", out);
+    cpu->ax = (uint16_t)oi; cpu->sp += 4;     /* cdecl: caller cleans varargs */
+}
+
+/* WritePrivateProfileString(lpSection,lpKey,lpString,lpFile): log what's written
+ * (Bob writes status/errors to an .INI here) and report success. */
+void KERNEL_WRITEPRIVATEPROFILESTRING(CPU *cpu) {
+    char sec[64]="", key[64]="", val[200]="", file[128]="";
+    if (a16(cpu,14)) read_asciiz(cpu, a16(cpu,14), a16(cpu,12), sec, sizeof sec);
+    if (a16(cpu,10)) read_asciiz(cpu, a16(cpu,10), a16(cpu,8),  key, sizeof key);
+    if (a16(cpu,6))  read_asciiz(cpu, a16(cpu,6),  a16(cpu,4),  val, sizeof val);
+    if (a16(cpu,2))  read_asciiz(cpu, a16(cpu,2),  a16(cpu,0),  file, sizeof file);
+    IMPL_LOG("[win16] WritePrivateProfileString [%s] %s=%s  (%s)\n", sec, key, val, file);
+    cpu->ax = 1; ret(cpu, 16);
 }

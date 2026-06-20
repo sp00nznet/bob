@@ -84,6 +84,27 @@ void dump_fn_ring(int n)
     fprintf(stderr, "--- end (total calls=%u) ---\n", g_fn_ring_pos);
 }
 
+#ifdef CATZ_WATCH_DS
+/* Print the first function entered with ds == CATZ_WATCH_DS (the bad segment),
+ * with a backtrace, to pinpoint where the corruption first lands in DS. */
+void catz_ds_check(const char *nm)
+{
+    static int fired = 0;
+    if (fired || !g_cpu || g_cpu->ds != (uint16_t)(CATZ_WATCH_DS)) return;
+    fired = 1;
+    fprintf(stderr, "[WATCH_DS] ds=%04X first at %s; backtrace:", g_cpu->ds, nm);
+    for (int i = 30; i >= 1; i--) {
+        const char *r = g_fn_ring[(g_fn_ring_pos - (unsigned)i) & (CATZ_FN_RING_SIZE - 1)];
+        if (r) fprintf(stderr, " %s", r);
+    }
+    fprintf(stderr, "\n");
+    fprintf(stderr, "  regs: ax=%04X bx=%04X cx=%04X dx=%04X si=%04X di=%04X bp=%04X sp=%04X es=%04X ss=%04X\n",
+            g_cpu->ax, g_cpu->bx, g_cpu->cx, g_cpu->dx, g_cpu->si, g_cpu->di,
+            g_cpu->bp, g_cpu->sp, g_cpu->es, g_cpu->ss);
+    fflush(stderr);
+}
+#endif
+
 #ifdef CATZ_WATCH_SP
 /* Flag the first time guest SP jumps UP sharply between function entries — a
  * callee that returned with an imbalanced stack (bad epilogue / unrestored

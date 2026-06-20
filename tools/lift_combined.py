@@ -45,6 +45,12 @@ MODULES = [
     (G('UEXTRA.DLL'),            24, 'uextra_ida.json'),
     (G('UTOPIAWA', 'UTOPIAWA.EXE'), 30, 'utopiawa_ida.json'),
     (G('MSAJT110.DLL'),          40, 'msajt110_ida.json'),
+    # MSABC110 (Access Basic runtime, 73 code segs, NO DGROUP) -> global 147..219;
+    # MSAES110 (Access Expression Service, 7 code + 1 DGROUP) -> global 220..227.
+    # Both were stubbed; the Jet/EB query path calls them (ERREBINITDGROUP, etc.)
+    # so the stubs made the thunk-dispatched Jet code run away (jetstack overflow).
+    (G('MSABC110.DLL'),          146, 'msabc110_ida.json'),
+    (G('MSAES110.DLL'),          219, 'msaes110_ida.json'),
 ]
 
 # Exact engine `call far [mem]` (OLE/IDispatch vtable) targets that MISS at
@@ -53,7 +59,11 @@ MODULES = [
 # the off=FFFF sentinel misses are intentional returns and are excluded).
 # {global_seg: [offsets]}. Re-collect after each round as InitInstance advances.
 FORCE_PROMOTE = {
-    2:  [0x05E9],          # OLE IDispatch method (seg021_004B vtable+0xC)
+    2:  [0x05E9,           # OLE IDispatch method (seg021_004B vtable+0xC)
+        0x083E],           # OLE sub-object Release (vtable+0x8); the unresolved
+                           # stub had no retf -> -4 stack imbalance corrupted the
+                           # caller's saved DS (read sub-obj seg 230 instead of
+                           # DGROUP 24), breaking the Jet-context word_D2B13 store.
     7:  [0x099E],
     11: [0x13EF],
     13: [0x681A],
@@ -321,6 +331,14 @@ def main():
     jt_ne = parse_ne(jt_path)
     xmod['MSAJT110'] = {e.ordinal: (e.segment + jt_off, e.offset) for e in jt_ne.entries}
     print(f"MSAJT110 export entries: {len(xmod['MSAJT110'])}")
+    # MSABC110 (Access Basic runtime) + MSAES110 (Expression Service) export
+    # tables -> xmod, so the engine's by-name imports resolve to direct lifted
+    # calls instead of the no-op stubs that overflowed the Jet stack.
+    for mod in ('MSABC110', 'MSAES110'):
+        m_path, m_off = next((p, o) for p, o, _ in MODULES if mod in p)
+        m_ne = parse_ne(m_path)
+        xmod[mod] = {e.ordinal: (e.segment + m_off, e.offset) for e in m_ne.entries}
+        print(f"{mod} export entries: {len(xmod[mod])}")
 
     total = 0
     for path, offset, ida in MODULES:
