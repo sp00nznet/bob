@@ -16756,6 +16756,10 @@ void seg014_A166(CPU *cpu);
 
 /* seg15 (1222 functions) */
 void seg015_32CD(CPU *cpu);
+void seg015_58AD(CPU *cpu);
+void seg015_5F54(CPU *cpu);
+void seg015_67F3(CPU *cpu);
+void seg015_6864(CPU *cpu);
 void seg015_695D(CPU *cpu);
 void seg015_6AB6(CPU *cpu);
 void seg015_0000(CPU *cpu);
@@ -17366,7 +17370,6 @@ void seg015_57FD(CPU *cpu);
 void seg015_587A(CPU *cpu);
 void seg015_588F(CPU *cpu);
 void seg015_5893(CPU *cpu);
-void seg015_58AD(CPU *cpu);
 void seg015_58BF(CPU *cpu);
 void seg015_5940(CPU *cpu);
 void seg015_59A6(CPU *cpu);
@@ -17418,7 +17421,6 @@ void seg015_5EA6(CPU *cpu);
 void seg015_5EAC(CPU *cpu);
 void seg015_5F20(CPU *cpu);
 void seg015_5F32(CPU *cpu);
-void seg015_5F54(CPU *cpu);
 void seg015_5F60(CPU *cpu);
 void seg015_5FAB(CPU *cpu);
 void seg015_5FC1(CPU *cpu);
@@ -17464,9 +17466,7 @@ void seg015_67B8(CPU *cpu);
 void seg015_67E0(CPU *cpu);
 void seg015_67E8(CPU *cpu);
 void seg015_67EE(CPU *cpu);
-void seg015_67F3(CPU *cpu);
 void seg015_685F(CPU *cpu);
-void seg015_6864(CPU *cpu);
 void seg015_6939(CPU *cpu);
 void seg015_6982(CPU *cpu);
 void seg015_6987(CPU *cpu);
@@ -17980,6 +17980,9 @@ void seg015_9F1D(CPU *cpu);
 
 /* seg16 (1071 functions) */
 void seg016_07D4(CPU *cpu);
+void seg016_1772(CPU *cpu);
+void seg016_17AC(CPU *cpu);
+void seg016_17C4(CPU *cpu);
 void seg016_0000(CPU *cpu);
 void seg016_0012(CPU *cpu);
 void seg016_0019(CPU *cpu);
@@ -18162,11 +18165,8 @@ void seg016_16C7(CPU *cpu);
 void seg016_16CD(CPU *cpu);
 void seg016_1744(CPU *cpu);
 void seg016_1750(CPU *cpu);
-void seg016_1772(CPU *cpu);
 void seg016_17A0(CPU *cpu);
-void seg016_17AC(CPU *cpu);
 void seg016_17BB(CPU *cpu);
-void seg016_17C4(CPU *cpu);
 void seg016_17EA(CPU *cpu);
 void seg016_17EF(CPU *cpu);
 void seg016_1810(CPU *cpu);
@@ -25148,8 +25148,7 @@ void seg022_28DE(CPU *cpu);
 void seg022_28EA(CPU *cpu);
 void seg022_2948(CPU *cpu);
 
-/* seg25 (90 functions) */
-void seg025_0158(CPU *cpu);
+/* seg25 (92 functions) */
 void seg025_0472(CPU *cpu);
 void seg025_0000(CPU *cpu);
 void seg025_0012(CPU *cpu);
@@ -25239,6 +25238,9 @@ void seg025_0658(CPU *cpu);
 void seg025_0665(CPU *cpu);
 void seg025_066C(CPU *cpu);
 void seg025_068C(CPU *cpu);
+void seg025_0116(CPU *cpu);
+void seg025_0158(CPU *cpu);
+void seg025_02B7(CPU *cpu);
 
 /* seg26 (214 functions) */
 void seg026_0010(CPU *cpu);
@@ -40205,7 +40207,8 @@ void seg073_0541(CPU *cpu);
 void seg073_057C(CPU *cpu);
 void seg073_0634(CPU *cpu);
 
-/* seg74 (90 functions) */
+/* seg74 (92 functions) */
+void seg074_023D(CPU *cpu);
 void seg074_0000(CPU *cpu);
 void seg074_0001(CPU *cpu);
 void seg074_0010(CPU *cpu);
@@ -40245,7 +40248,6 @@ void seg074_0200(CPU *cpu);
 void seg074_0211(CPU *cpu);
 void seg074_0216(CPU *cpu);
 void seg074_021B(CPU *cpu);
-void seg074_023D(CPU *cpu);
 void seg074_0244(CPU *cpu);
 void seg074_0264(CPU *cpu);
 void seg074_0266(CPU *cpu);
@@ -40296,6 +40298,8 @@ void seg074_0519(CPU *cpu);
 void seg074_0545(CPU *cpu);
 void seg074_054D(CPU *cpu);
 void seg074_055C(CPU *cpu);
+void seg074_0241(CPU *cpu);
+void seg074_025A(CPU *cpu);
 
 /* seg75 (118 functions) */
 void seg075_0000(CPU *cpu);
@@ -55620,6 +55624,7 @@ void seg144_1D2A(CPU *cpu);
 void seg144_1D9D(CPU *cpu);
 
 /* seg147 (44 functions) */
+void seg147_0206(CPU *cpu);
 void seg147_0000(CPU *cpu);
 void seg147_0028(CPU *cpu);
 void seg147_002C(CPU *cpu);
@@ -55644,7 +55649,6 @@ void seg147_01E1(CPU *cpu);
 void seg147_01EB(CPU *cpu);
 void seg147_01EE(CPU *cpu);
 void seg147_0204(CPU *cpu);
-void seg147_0206(CPU *cpu);
 void seg147_0228(CPU *cpu);
 void seg147_0242(CPU *cpu);
 void seg147_0243(CPU *cpu);
@@ -55671,11 +55675,14 @@ void seg148_0004(CPU *cpu);
 void seg148_0016(CPU *cpu);
 void seg148_0018(CPU *cpu);
 
-/* seg149 (1696 functions) */
+/* seg149 (1704 functions) */
+void seg149_0580(CPU *cpu);
 void seg149_059B(CPU *cpu);
+void seg149_2510(CPU *cpu);
 void seg149_2518(CPU *cpu);
 void seg149_29F8(CPU *cpu);
 void seg149_2B65(CPU *cpu);
+void seg149_5709(CPU *cpu);
 void seg149_0000(CPU *cpu);
 void seg149_0009(CPU *cpu);
 void seg149_0014(CPU *cpu);
@@ -55787,7 +55794,6 @@ void seg149_0522(CPU *cpu);
 void seg149_053B(CPU *cpu);
 void seg149_0568(CPU *cpu);
 void seg149_056D(CPU *cpu);
-void seg149_0580(CPU *cpu);
 void seg149_0586(CPU *cpu);
 void seg149_0598(CPU *cpu);
 void seg149_05D9(CPU *cpu);
@@ -56253,7 +56259,6 @@ void seg149_24C6(CPU *cpu);
 void seg149_24E7(CPU *cpu);
 void seg149_24E8(CPU *cpu);
 void seg149_24FF(CPU *cpu);
-void seg149_2510(CPU *cpu);
 void seg149_2513(CPU *cpu);
 void seg149_251A(CPU *cpu);
 void seg149_253C(CPU *cpu);
@@ -56968,7 +56973,6 @@ void seg149_56F1(CPU *cpu);
 void seg149_5702(CPU *cpu);
 void seg149_5706(CPU *cpu);
 void seg149_5708(CPU *cpu);
-void seg149_5709(CPU *cpu);
 void seg149_570D(CPU *cpu);
 void seg149_5712(CPU *cpu);
 void seg149_5746(CPU *cpu);
@@ -57368,10 +57372,21 @@ void seg149_70F8(CPU *cpu);
 void seg149_712E(CPU *cpu);
 void seg149_7134(CPU *cpu);
 void seg149_714C(CPU *cpu);
+void seg149_013F(CPU *cpu);
+void seg149_0156(CPU *cpu);
+void seg149_04B0(CPU *cpu);
+void seg149_2FCA(CPU *cpu);
+void seg149_4AF6(CPU *cpu);
+void seg149_4B43(CPU *cpu);
+void seg149_5D8A(CPU *cpu);
+void seg149_6289(CPU *cpu);
 
-/* seg150 (1092 functions) */
+/* seg150 (1111 functions) */
+void seg150_261E(CPU *cpu);
+void seg150_2647(CPU *cpu);
 void seg150_49A7(CPU *cpu);
 void seg150_7853(CPU *cpu);
+void seg150_78E6(CPU *cpu);
 void seg150_0000(CPU *cpu);
 void seg150_0010(CPU *cpu);
 void seg150_0011(CPU *cpu);
@@ -57645,11 +57660,9 @@ void seg150_25BE(CPU *cpu);
 void seg150_25D2(CPU *cpu);
 void seg150_25D5(CPU *cpu);
 void seg150_260A(CPU *cpu);
-void seg150_261E(CPU *cpu);
 void seg150_261F(CPU *cpu);
 void seg150_2629(CPU *cpu);
 void seg150_2634(CPU *cpu);
-void seg150_2647(CPU *cpu);
 void seg150_2648(CPU *cpu);
 void seg150_2652(CPU *cpu);
 void seg150_266D(CPU *cpu);
@@ -58318,7 +58331,6 @@ void seg150_78DA(CPU *cpu);
 void seg150_78DB(CPU *cpu);
 void seg150_78DF(CPU *cpu);
 void seg150_78E4(CPU *cpu);
-void seg150_78E6(CPU *cpu);
 void seg150_7902(CPU *cpu);
 void seg150_7936(CPU *cpu);
 void seg150_7946(CPU *cpu);
@@ -58462,8 +58474,30 @@ void seg150_856F(CPU *cpu);
 void seg150_8586(CPU *cpu);
 void seg150_8596(CPU *cpu);
 void seg150_85A7(CPU *cpu);
+void seg150_1E3D(CPU *cpu);
+void seg150_3F2E(CPU *cpu);
+void seg150_5326(CPU *cpu);
+void seg150_6088(CPU *cpu);
+void seg150_72D0(CPU *cpu);
+void seg150_72D3(CPU *cpu);
+void seg150_7349(CPU *cpu);
+void seg150_7353(CPU *cpu);
+void seg150_739D(CPU *cpu);
+void seg150_73EC(CPU *cpu);
+void seg150_7446(CPU *cpu);
+void seg150_7499(CPU *cpu);
+void seg150_74BB(CPU *cpu);
+void seg150_75BB(CPU *cpu);
+void seg150_7644(CPU *cpu);
+void seg150_7682(CPU *cpu);
+void seg150_790F(CPU *cpu);
+void seg150_7D71(CPU *cpu);
+void seg150_7E7E(CPU *cpu);
 
 /* seg151 (677 functions) */
+void seg151_0948(CPU *cpu);
+void seg151_0F5B(CPU *cpu);
+void seg151_3C72(CPU *cpu);
 void seg151_02A0(CPU *cpu);
 void seg151_063C(CPU *cpu);
 void seg151_0657(CPU *cpu);
@@ -58496,7 +58530,6 @@ void seg151_0917(CPU *cpu);
 void seg151_0919(CPU *cpu);
 void seg151_0923(CPU *cpu);
 void seg151_0942(CPU *cpu);
-void seg151_0948(CPU *cpu);
 void seg151_094F(CPU *cpu);
 void seg151_0954(CPU *cpu);
 void seg151_0957(CPU *cpu);
@@ -58547,7 +58580,6 @@ void seg151_0EE1(CPU *cpu);
 void seg151_0F36(CPU *cpu);
 void seg151_0F56(CPU *cpu);
 void seg151_0F5A(CPU *cpu);
-void seg151_0F5B(CPU *cpu);
 void seg151_0F70(CPU *cpu);
 void seg151_0F9B(CPU *cpu);
 void seg151_0F9F(CPU *cpu);
@@ -59041,7 +59073,6 @@ void seg151_3C43(CPU *cpu);
 void seg151_3C46(CPU *cpu);
 void seg151_3C6D(CPU *cpu);
 void seg151_3C6E(CPU *cpu);
-void seg151_3C72(CPU *cpu);
 void seg151_3C75(CPU *cpu);
 void seg151_3C83(CPU *cpu);
 void seg151_4058(CPU *cpu);
@@ -59142,13 +59173,14 @@ void seg151_46F4(CPU *cpu);
 void seg151_46FA(CPU *cpu);
 void seg151_470A(CPU *cpu);
 
-/* seg152 (161 functions) */
+/* seg152 (163 functions) */
+void seg152_0014(CPU *cpu);
+void seg152_0243(CPU *cpu);
 void seg152_0000(CPU *cpu);
 void seg152_0003(CPU *cpu);
 void seg152_0005(CPU *cpu);
 void seg152_000A(CPU *cpu);
 void seg152_000F(CPU *cpu);
-void seg152_0014(CPU *cpu);
 void seg152_0017(CPU *cpu);
 void seg152_001C(CPU *cpu);
 void seg152_0020(CPU *cpu);
@@ -59184,7 +59216,6 @@ void seg152_0203(CPU *cpu);
 void seg152_0206(CPU *cpu);
 void seg152_0208(CPU *cpu);
 void seg152_0241(CPU *cpu);
-void seg152_0243(CPU *cpu);
 void seg152_0246(CPU *cpu);
 void seg152_024E(CPU *cpu);
 void seg152_0258(CPU *cpu);
@@ -59304,6 +59335,8 @@ void seg152_0C4B(CPU *cpu);
 void seg152_0C51(CPU *cpu);
 void seg152_0C6C(CPU *cpu);
 void seg152_0C71(CPU *cpu);
+void seg152_06D1(CPU *cpu);
+void seg152_0A24(CPU *cpu);
 
 /* seg153 (22 functions) */
 void seg153_0000(CPU *cpu);
@@ -59555,9 +59588,10 @@ void seg156_13F0(CPU *cpu);
 void seg156_13F7(CPU *cpu);
 void seg156_1418(CPU *cpu);
 
-/* seg157 (128 functions) */
+/* seg157 (130 functions) */
 void seg157_0159(CPU *cpu);
 void seg157_0271(CPU *cpu);
+void seg157_0307(CPU *cpu);
 void seg157_0000(CPU *cpu);
 void seg157_0012(CPU *cpu);
 void seg157_0014(CPU *cpu);
@@ -59603,7 +59637,6 @@ void seg157_02C2(CPU *cpu);
 void seg157_02DB(CPU *cpu);
 void seg157_02E0(CPU *cpu);
 void seg157_02E5(CPU *cpu);
-void seg157_0307(CPU *cpu);
 void seg157_030E(CPU *cpu);
 void seg157_032E(CPU *cpu);
 void seg157_0330(CPU *cpu);
@@ -59684,13 +59717,12 @@ void seg157_0828(CPU *cpu);
 void seg157_0836(CPU *cpu);
 void seg157_0837(CPU *cpu);
 void seg157_0840(CPU *cpu);
+void seg157_030B(CPU *cpu);
+void seg157_0324(CPU *cpu);
 
-/* seg158 (1794 functions) */
+/* seg158 (1797 functions) */
 void seg158_058C(CPU *cpu);
 void seg158_063E(CPU *cpu);
-void seg158_7FC7(CPU *cpu);
-void seg158_7FD3(CPU *cpu);
-void seg158_7FD6(CPU *cpu);
 void seg158_0000(CPU *cpu);
 void seg158_0011(CPU *cpu);
 void seg158_0013(CPU *cpu);
@@ -61480,10 +61512,17 @@ void seg158_9D78(CPU *cpu);
 void seg158_9D88(CPU *cpu);
 void seg158_9DAC(CPU *cpu);
 void seg158_9DD6(CPU *cpu);
+void seg158_7FC7(CPU *cpu);
+void seg158_7FCD(CPU *cpu);
+void seg158_7FD0(CPU *cpu);
+void seg158_7FD3(CPU *cpu);
+void seg158_7FD6(CPU *cpu);
+void seg158_7FD9(CPU *cpu);
 
-/* seg159 (503 functions) */
+/* seg159 (519 functions) */
 void seg159_048A(CPU *cpu);
 void seg159_04CE(CPU *cpu);
+void seg159_1262(CPU *cpu);
 void seg159_0000(CPU *cpu);
 void seg159_0011(CPU *cpu);
 void seg159_0014(CPU *cpu);
@@ -61771,7 +61810,6 @@ void seg159_1240(CPU *cpu);
 void seg159_124A(CPU *cpu);
 void seg159_125E(CPU *cpu);
 void seg159_1261(CPU *cpu);
-void seg159_1262(CPU *cpu);
 void seg159_126E(CPU *cpu);
 void seg159_1270(CPU *cpu);
 void seg159_128B(CPU *cpu);
@@ -61985,6 +62023,22 @@ void seg159_205D(CPU *cpu);
 void seg159_2066(CPU *cpu);
 void seg159_206C(CPU *cpu);
 void seg159_207F(CPU *cpu);
+void seg159_0496(CPU *cpu);
+void seg159_049C(CPU *cpu);
+void seg159_049F(CPU *cpu);
+void seg159_04A2(CPU *cpu);
+void seg159_04A5(CPU *cpu);
+void seg159_04A8(CPU *cpu);
+void seg159_04AB(CPU *cpu);
+void seg159_04AE(CPU *cpu);
+void seg159_04B1(CPU *cpu);
+void seg159_04B4(CPU *cpu);
+void seg159_04B7(CPU *cpu);
+void seg159_04BA(CPU *cpu);
+void seg159_04BD(CPU *cpu);
+void seg159_04C0(CPU *cpu);
+void seg159_04C3(CPU *cpu);
+void seg159_04C6(CPU *cpu);
 
 /* seg160 (849 functions) */
 void seg160_0032(CPU *cpu);
@@ -62879,8 +62933,12 @@ void seg163_014A(CPU *cpu);
 /* seg164 (1 functions) */
 void seg164_0000(CPU *cpu);
 
-/* seg165 (330 functions) */
+/* seg165 (331 functions) */
+void seg165_0D27(CPU *cpu);
+void seg165_17F6(CPU *cpu);
+void seg165_17FA(CPU *cpu);
 void seg165_1800(CPU *cpu);
+void seg165_1956(CPU *cpu);
 void seg165_0522(CPU *cpu);
 void seg165_0535(CPU *cpu);
 void seg165_0538(CPU *cpu);
@@ -63009,7 +63067,6 @@ void seg165_0CFA(CPU *cpu);
 void seg165_0D0C(CPU *cpu);
 void seg165_0D11(CPU *cpu);
 void seg165_0D1A(CPU *cpu);
-void seg165_0D27(CPU *cpu);
 void seg165_0D36(CPU *cpu);
 void seg165_0D89(CPU *cpu);
 void seg165_0D8D(CPU *cpu);
@@ -63145,8 +63202,6 @@ void seg165_17E7(CPU *cpu);
 void seg165_17EB(CPU *cpu);
 void seg165_17EF(CPU *cpu);
 void seg165_17F3(CPU *cpu);
-void seg165_17F6(CPU *cpu);
-void seg165_17FA(CPU *cpu);
 void seg165_17FD(CPU *cpu);
 void seg165_1819(CPU *cpu);
 void seg165_181F(CPU *cpu);
@@ -63187,7 +63242,6 @@ void seg165_193D(CPU *cpu);
 void seg165_1946(CPU *cpu);
 void seg165_194C(CPU *cpu);
 void seg165_1951(CPU *cpu);
-void seg165_1956(CPU *cpu);
 void seg165_1962(CPU *cpu);
 void seg165_1987(CPU *cpu);
 void seg165_199B(CPU *cpu);
@@ -63210,12 +63264,13 @@ void seg165_1A09(CPU *cpu);
 void seg165_1A18(CPU *cpu);
 void seg165_1A20(CPU *cpu);
 void seg165_1A2F(CPU *cpu);
+void seg165_197A(CPU *cpu);
 
-/* seg166 (838 functions) */
+/* seg166 (848 functions) */
+void seg166_06F8(CPU *cpu);
 void seg166_0B96(CPU *cpu);
 void seg166_0BA1(CPU *cpu);
 void seg166_0BA3(CPU *cpu);
-void seg166_124C(CPU *cpu);
 void seg166_045A(CPU *cpu);
 void seg166_0496(CPU *cpu);
 void seg166_04A4(CPU *cpu);
@@ -63226,7 +63281,6 @@ void seg166_0529(CPU *cpu);
 void seg166_05B6(CPU *cpu);
 void seg166_05B8(CPU *cpu);
 void seg166_061E(CPU *cpu);
-void seg166_06F8(CPU *cpu);
 void seg166_0704(CPU *cpu);
 void seg166_0BE6(CPU *cpu);
 void seg166_0BF0(CPU *cpu);
@@ -64050,6 +64104,17 @@ void seg166_441D(CPU *cpu);
 void seg166_4438(CPU *cpu);
 void seg166_443D(CPU *cpu);
 void seg166_444A(CPU *cpu);
+void seg166_052E(CPU *cpu);
+void seg166_0552(CPU *cpu);
+void seg166_055E(CPU *cpu);
+void seg166_05C4(CPU *cpu);
+void seg166_0636(CPU *cpu);
+void seg166_105F(CPU *cpu);
+void seg166_107F(CPU *cpu);
+void seg166_124C(CPU *cpu);
+void seg166_2657(CPU *cpu);
+void seg166_2D25(CPU *cpu);
+void seg166_394B(CPU *cpu);
 
 /* seg167 (125 functions) */
 void seg167_05FE(CPU *cpu);
@@ -64217,7 +64282,7 @@ void seg170_00DE(CPU *cpu);
 void seg170_00E4(CPU *cpu);
 void seg170_00E8(CPU *cpu);
 
-/* seg171 (190 functions) */
+/* seg171 (191 functions) */
 void seg171_0000(CPU *cpu);
 void seg171_001E(CPU *cpu);
 void seg171_0023(CPU *cpu);
@@ -64408,6 +64473,7 @@ void seg171_0EE2(CPU *cpu);
 void seg171_0EF2(CPU *cpu);
 void seg171_0F0C(CPU *cpu);
 void seg171_0F38(CPU *cpu);
+void seg171_0AFC(CPU *cpu);
 
 /* seg172 (41 functions) */
 void seg172_0000(CPU *cpu);

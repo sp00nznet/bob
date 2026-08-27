@@ -48,6 +48,9 @@ class Segment:
     flags: int          # Segment flags
     alloc_size: int     # Minimum allocation size (0 = 64KB)
     data: bytes = b''   # Raw segment data
+    alt_streams: dict = field(default_factory=dict)  # {offset: [Instruction]} for
+                        # entry points that are not instruction boundaries in the
+                        # main decoding -- see ne_decode.decode_alt_entries
     relocations: list = field(default_factory=list)  # List[Relocation]
 
     @property

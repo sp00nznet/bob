@@ -82,6 +82,18 @@ _SEED = {
 # `cpu->sp += 4 (far retaddr) + purge`, or `retf` boundaries corrupt. Keyed by
 # (MODULE, API). Functions not listed default to 0 with a runtime warning.
 PURGE = {
+    ('USER', 'ANSILOWER'): 4, ('USER', 'ANSIUPPER'): 4,
+    ('USER', 'ANSILOWERBUFF'): 6,
+    ('USER', 'ANSINEXT'): 4, ('USER', 'ANSIPREV'): 8,
+    ('KEYBOARD', 'ANSILOWER'): 4, ('KEYBOARD', 'ANSIUPPER'): 4,
+
+    # Reached once the tail-jump fix let the engine run its real paths.
+    ('KERNEL', 'GETPROFILEINT'): 10, ('KERNEL', 'GETPROFILESTRING'): 18,
+    ('KERNEL', 'GETTEMPFILENAME'): 12, ('USER', 'LSTRCMPI'): 8,
+    ('USER', 'LSTRCMP'): 8,
+    ('KEYBOARD', 'ANSITOOEM'): 8, ('KEYBOARD', 'OEMTOANSI'): 8,
+    ('KEYBOARD', 'ANSITOOEMBUFF'): 10, ('KEYBOARD', 'OEMTOANSIBUFF'): 10,
+
     # Reached once UTOPIA -> UEXTRA resolved and the Access Basic runtime
     # actually ran. A stub with a guessed purge of 0 leaves the caller's
     # arguments on the stack, so its caller returns through them -- that is

@@ -188,27 +188,40 @@ class NELifter(Lifter):
                'jl': 'cc_l', 'jge': 'cc_ge', 'jle': 'cc_le', 'jg': 'cc_g'}
         if (m == 'jmp' or m in _CC) and op1 and op1.type in (OpType.REL8, OpType.REL16):
             target = op1.disp
-            if (target not in self.valid_addrs
-                    and target in getattr(self, 'seg_func_offsets', ())):
-                callee = f'seg{self.seg.index:03d}_{target:04X}'
-                if m == 'jmp':
-                    self._emit(f'{callee}(cpu); return;', orig)
+            if target not in self.valid_addrs:
+                if target in getattr(self, 'seg_func_offsets', ()):
+                    tail = f'seg{self.seg.index:03d}_{target:04X}(cpu); return;'
                 else:
-                    self._emit(f'if ({_CC[m]}(cpu)) {{ {callee}(cpu); return; }}', orig)
+                    # No function there: IDA read those bytes as data, so
+                    # nothing was lifted at that offset. Dispatch on the
+                    # segment we are IN. lift16's fallback splits a
+                    # file-absolute address as (abs >> 4, abs & 0xF), which
+                    # names a segment that does not exist -- the miss then
+                    # returns early and the caller reads its locals off a
+                    # stack nobody unwound. A miss here is still a miss, but
+                    # an honest one, and it lands if the target is ever
+                    # promoted.
+                    tail = (f'recomp_dispatch(cpu, {self.seg.index}, '
+                            f'0x{target:04X}); return;')
+                if m == 'jmp':
+                    self._emit(tail, orig)
+                else:
+                    self._emit(f'if ({_CC[m]}(cpu)) {{ {tail} }}', orig)
                 return
 
         # --- loop/jcxz to another function in this segment -> tail call ---
         if m in ('loop', 'loopz', 'loopnz', 'jcxz') and op1 and op1.type in (OpType.REL8, OpType.REL16):
             target = op1.disp
-            if (target not in self.valid_addrs
-                    and target in getattr(self, 'seg_func_offsets', ())):
-                callee = f'seg{self.seg.index:03d}_{target:04X}'
+            if target not in self.valid_addrs:
+                callee = (f'seg{self.seg.index:03d}_{target:04X}(cpu); return;'
+                          if target in getattr(self, 'seg_func_offsets', ())
+                          else f'recomp_dispatch(cpu, {self.seg.index}, 0x{target:04X}); return;')
                 cond = {'loop': 'cpu->cx != 0',
                         'loopz': 'cpu->cx != 0 && zf(cpu)',
                         'loopnz': 'cpu->cx != 0 && !zf(cpu)',
                         'jcxz': 'cpu->cx == 0'}[m]
                 dec = 'cpu->cx--; ' if m != 'jcxz' else ''
-                self._emit(f'{dec}if ({cond}) {{ {callee}(cpu); return; }}', orig)
+                self._emit(f'{dec}if ({cond}) {{ {callee} }}', orig)
                 return
 
         # --- Far jumps (resolve via relocation -> tail call) ---
@@ -706,8 +719,15 @@ def lift_segment(ne: NEHeader, seg_num: int, func_offset: int = -1, xmod=None):
     # the uni harness: seg035_028B's `call di` -> seg035_0BD5 was never made).
     lifter.dispatch = True
     # Function entry offsets in this segment, for near-jmp-to-another-function.
-    lifter.seg_func_offsets = {f.offset for f in functions}
+    lifter.seg_func_offsets = ({f.offset for f in functions}
+                               | set(getattr(seg, 'alt_streams', {})))
 
+    # An entry that is not an instruction boundary (the `cmp al, imm8`
+    # skip idiom) carries its own decoding; lift it as its own function so
+    # branches to it have somewhere to land. Its bytes overlap another
+    # function's, which is exactly the point, so it is emitted alongside
+    # rather than folded into the boundary list.
+    alt = getattr(seg, 'alt_streams', {})
     target_funcs = functions
     if func_offset >= 0:
         target_funcs = [f for f in functions if f.offset == func_offset]
@@ -718,6 +738,7 @@ def lift_segment(ne: NEHeader, seg_num: int, func_offset: int = -1, xmod=None):
     # Map each function start offset to its label, for fall-through handling.
     off_to_label = {f.offset: f.label for f in functions}
     TERMINATORS = ('ret', 'retf', 'iret', 'jmp')
+    NL = chr(10)
 
     for func in target_funcs:
         # Get instructions for this function
@@ -755,6 +776,21 @@ def lift_segment(ne: NEHeader, seg_num: int, func_offset: int = -1, xmod=None):
 
         print(code)
         print()
+
+    if func_offset < 0:
+        for off, stream in sorted(alt.items()):
+            label = f'seg{seg.index:03d}_{off:04X}'
+            is_far = any(i.mnemonic in ('retf', 'iret') for i in stream)
+            code = lifter.lift_function(label, stream,
+                                        seg.file_offset + off, is_far)
+            code = NL.join(
+                ln for ln in code.split(NL)
+                if not (ln.lstrip().startswith('recomp_dispatch(cpu,')
+                        and '/* fallthrough 0x' in ln))
+            code = code.replace('{' + NL,
+                                '{' + NL + '    TRACE_FN("%s");' % label + NL, 1)
+            print(code)
+            print()
 
 
 def main():

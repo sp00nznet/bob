@@ -449,6 +449,79 @@ void KERNEL_GETDOSENVIRONMENT(CPU *cpu) {
     ret(cpu, 0);
 }
 
+/* ===== KERNEL: profile / temp files / string helpers ===== */
+
+static void write_asciiz(CPU *cpu, uint16_t seg, uint16_t off, const char *s, int max) {
+    int i = 0;
+    for (; s[i] && i < max - 1; i++) mem_write8(cpu, seg, (uint16_t)(off + i), (uint8_t)s[i]);
+    mem_write8(cpu, seg, (uint16_t)(off + i), 0);
+}
+
+/* UINT GetProfileInt(LPCSTR app, LPCSTR key, int nDefault)
+ * There is no WIN.INI here, so every setting takes its default -- what a clean
+ * install would give. Returning 0 instead is a different answer, and for a
+ * size or a count it is the one that makes the caller loop. */
+void KERNEL_GETPROFILEINT(CPU *cpu) {
+    cpu->ax = a16(cpu, 0);
+    ret(cpu, 10);
+}
+
+/* int GetProfileString(LPCSTR app, LPCSTR key, LPCSTR def, LPSTR buf, int cb) */
+void KERNEL_GETPROFILESTRING(CPU *cpu) {
+    char def[256] = "";
+    int cb = (int)a16(cpu, 0);
+    uint16_t boff = a16(cpu, 2), bseg = a16(cpu, 4);
+    if (a16(cpu, 8)) read_asciiz(cpu, a16(cpu, 8), a16(cpu, 6), def, sizeof def);
+    if (bseg && cb > 0) write_asciiz(cpu, bseg, boff, def, cb);
+    cpu->ax = (uint16_t)strlen(def);
+    ret(cpu, 18);
+}
+
+/* UINT GetTempFileName(BYTE drive, LPCSTR prefix, UINT unique, LPSTR out)
+ * Jet builds its scratch database through this. The stub wrote nothing and
+ * returned 0, so the caller opened whatever bytes were already in its buffer --
+ * the `[file] open '      (((((  ...'` lines in the log.
+ * ponytail: the name has no directory, so bob_resolve drops it in the install
+ * dir alongside the .MDBs; give it a real temp path if that ever matters. */
+void KERNEL_GETTEMPFILENAME(CPU *cpu) {
+    static uint16_t next_unique = 1;
+    char prefix[8] = "", path[80];
+    uint16_t ooff = a16(cpu, 0), oseg = a16(cpu, 2);
+    uint16_t unique = a16(cpu, 4);
+    if (a16(cpu, 8)) read_asciiz(cpu, a16(cpu, 8), a16(cpu, 6), prefix, sizeof prefix);
+    if (!unique) unique = next_unique++;
+    snprintf(path, sizeof path, "%.3s%04X.TMP", prefix, unique);
+    if (oseg) write_asciiz(cpu, oseg, ooff, path, (int)sizeof path);
+    IMPL_LOG("[win16] GetTempFileName -> %s\n", path);
+    cpu->ax = unique;
+    ret(cpu, 12);
+}
+
+/* int lstrcmp / lstrcmpi (LPCSTR, LPCSTR) */
+static void lstr_cmp_common(CPU *cpu, int fold) {
+    char a[256] = "", b[256] = "";
+    int r;
+    if (a16(cpu, 6)) read_asciiz(cpu, a16(cpu, 6), a16(cpu, 4), a, sizeof a);
+    if (a16(cpu, 2)) read_asciiz(cpu, a16(cpu, 2), a16(cpu, 0), b, sizeof b);
+    r = fold ? _stricmp(a, b) : strcmp(a, b);
+    cpu->ax = (uint16_t)(int16_t)(r < 0 ? -1 : (r > 0 ? 1 : 0));
+    ret(cpu, 8);
+}
+void USER_LSTRCMPI(CPU *cpu) { lstr_cmp_common(cpu, 1); }
+void USER_LSTRCMP(CPU *cpu)  { lstr_cmp_common(cpu, 0); }
+
+/* OemToAnsi / AnsiToOem: identity over the ASCII range, which is all Bob uses.
+ * The stub copied nothing, so the destination kept whatever it already held. */
+static void oem_ansi_copy(CPU *cpu) {
+    char s[512] = "";
+    if (a16(cpu, 6)) read_asciiz(cpu, a16(cpu, 6), a16(cpu, 4), s, sizeof s);
+    if (a16(cpu, 2)) write_asciiz(cpu, a16(cpu, 2), a16(cpu, 0), s, (int)sizeof s);
+    cpu->ax = 1;
+    ret(cpu, 8);
+}
+void KEYBOARD_OEMTOANSI(CPU *cpu) { oem_ansi_copy(cpu); }
+void KEYBOARD_ANSITOOEM(CPU *cpu) { oem_ansi_copy(cpu); }
+
 /* ===== KERNEL: module / version / task ===== */
 
 void KERNEL_GETWINFLAGS(CPU *cpu) {         /* DX:AX: WF_PMODE|WF_CPU386|WF_ENHANCED */

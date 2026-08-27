@@ -13,7 +13,12 @@ include_directories(runtime)
 # Build the lifted engine + host as a static library.
 if(SEGMENT_SOURCES)
     add_library(bob_segments STATIC ${SEGMENT_SOURCES})
+    # -foptimize-sibling-calls is load-bearing, not an optimisation: a guest loop
+    # IDA split across two functions lifts to two C functions that tail-call each
+    # other, which is unbounded recursion until the compiler turns each
+    # `f(cpu); return;` into a jump.
     target_compile_options(bob_segments PRIVATE
+        -foptimize-sibling-calls
         -Wall
         -Wno-unused-variable
         -Wno-unused-label
