@@ -147,7 +147,17 @@ class NELifter(Lifter):
         # --- Far calls with relocation resolution ---
         if m == 'call' and op1 and op1.type == OpType.FAR:
             func_name = self._resolve_far_call(inst)
-            if func_name and not func_name.startswith('/*'):
+            if func_name and func_name == getattr(self, 'setjmp_fn', None):
+                # Guest setjmp. The host anchor JET_SETJMP plants has to sit
+                # in THIS function's frame -- the one the guest returns to
+                # when it longjmps -- so it is a macro at the call site
+                # rather than anything the callee could do. A non-zero
+                # result means a longjmp landed here with the guest
+                # registers already restored, so there is nothing to do but
+                # carry on. See runtime/win16/jet_setjmp.h.
+                self._emit(f'if (JET_SETJMP(cpu) == 0) {{ push16(cpu, cpu->cs); '
+                           f'push16(cpu, 0xFFFF); {func_name}(cpu); }}', orig)
+            elif func_name and not func_name.startswith('/*'):
                 self._emit(f'push16(cpu, cpu->cs); push16(cpu, 0xFFFF);', 'far call return addr')
                 self._emit(f'{func_name}(cpu);', orig)
             elif func_name:
@@ -719,6 +729,7 @@ def lift_segment(ne: NEHeader, seg_num: int, func_offset: int = -1, xmod=None):
     # the uni harness: seg035_028B's `call di` -> seg035_0BD5 was never made).
     lifter.dispatch = True
     # Function entry offsets in this segment, for near-jmp-to-another-function.
+    lifter.setjmp_fn = getattr(ne, 'setjmp_fn', None)
     lifter.seg_func_offsets = ({f.offset for f in functions}
                                | set(getattr(seg, 'alt_streams', {})))
 
@@ -739,6 +750,13 @@ def lift_segment(ne: NEHeader, seg_num: int, func_offset: int = -1, xmod=None):
     off_to_label = {f.offset: f.label for f in functions}
     TERMINATORS = ('ret', 'retf', 'iret', 'jmp')
     NL = chr(10)
+
+    # Functions the runtime replaces by hand (see OVERRIDES in
+    # lift_combined.py): emitting the lifted body too would be a duplicate
+    # symbol, and the lifted body is the thing being replaced.
+    overrides = getattr(ne, 'overrides', set())
+    target_funcs = [f for f in target_funcs
+                    if (seg.index, f.offset) not in overrides]
 
     for func in target_funcs:
         # Get instructions for this function

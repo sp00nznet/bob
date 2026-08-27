@@ -77,6 +77,16 @@ FORCE_PROMOTE = {
 }
 
 
+# MSAJT110's setjmp/longjmp, in global segment numbers (its NE segs 32 and 33
+# at MODULES offset 40). Jet unwinds errors through these, and a longjmp has
+# to discard the C frames between it and the setjmp site -- something no
+# lifted body can do. runtime/win16/jet_setjmp.c replaces longjmp with the
+# host's, and the lifter wraps every setjmp CALL SITE in the JET_SETJMP macro
+# so the anchor lands in the right frame.
+JET_SETJMP_FN = (72, 0x41EF)
+OVERRIDES = {(72, 0x421A), (72, 0x4224)}
+
+
 def offset_module(ne, offset):
     """Shift a module's segment indices and internal relocation targets."""
     if offset == 0:
@@ -389,6 +399,8 @@ def main():
     for path, offset, ida in MODULES:
         name = os.path.basename(path)
         ne = engine if offset == 0 else parse_ne(path)
+        ne.setjmp_fn = 'seg%03d_%04X' % JET_SETJMP_FN
+        ne.overrides = OVERRIDES
         offset_module(ne, offset)
         ida_map = build_ida_map(ida, offset, ne)
         code = [s for s in ne.segments if s.is_code]

@@ -6,6 +6,7 @@
 
 #include "cpu.h"
 #include "runtime_api.h"
+#include "jet_setjmp.h"
 
 /* ---- SEGMENT SELECTOR PLACEHOLDERS ----
  * Protected-mode NE selectors map to flat-memory bases at runtime.
@@ -39589,6 +39590,8 @@ void seg071_4BB6(CPU *cpu);
 void seg071_4BC0(CPU *cpu);
 
 /* seg72 (574 functions) */
+void seg072_421A(CPU *cpu);
+void seg072_4224(CPU *cpu);
 void seg072_0000(CPU *cpu);
 void seg072_0012(CPU *cpu);
 void seg072_0014(CPU *cpu);
@@ -40161,8 +40164,6 @@ void seg072_41A6(CPU *cpu);
 void seg072_41AD(CPU *cpu);
 void seg072_41D4(CPU *cpu);
 void seg072_41EF(CPU *cpu);
-void seg072_421A(CPU *cpu);
-void seg072_4224(CPU *cpu);
 
 /* seg73 (41 functions) */
 void seg073_0000(CPU *cpu);

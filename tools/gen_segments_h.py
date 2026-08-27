@@ -40,6 +40,9 @@ def main():
     lines.append('')
     lines.append('#include "cpu.h"')
     lines.append('#include "runtime_api.h"')
+    # JET_SETJMP is a macro because the anchor has to live in the frame that
+    # calls setjmp; the lifter wraps each Jet setjmp call site in it.
+    lines.append('#include "jet_setjmp.h"')
     lines.append('')
     lines.append('/* ---- SEGMENT SELECTOR PLACEHOLDERS ----')
     lines.append(' * Protected-mode NE selectors map to flat-memory bases at runtime.')

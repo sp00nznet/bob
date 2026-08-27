@@ -24,7 +24,12 @@ CALL_RE = re.compile(r'\b(seg\d+_[0-9A-Fa-f]+)\(cpu\)')
 def main():
     defined = set()
     called = set()
-    for path in glob.glob(os.path.join(SRC, '*.c')):
+    # The runtime hand-writes a few segNNN_XXXX bodies for guest functions the
+    # lifted model cannot express (Jet's longjmp). Those are definitions too;
+    # stubbing them as well is a duplicate symbol.
+    for path in (glob.glob(os.path.join(SRC, '*.c'))
+                 + glob.glob(os.path.join(ROOT, 'runtime', '*.c'))
+                 + glob.glob(os.path.join(ROOT, 'runtime', 'win16', '*.c'))):
         if os.path.basename(path) == os.path.basename(OUT):
             continue
         text = open(path, encoding='utf-8', errors='replace').read()
