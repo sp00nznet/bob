@@ -878,3 +878,44 @@ not, and `system.mdb` in Jet's own DGROUP is the likeliest thing it wants.
 
 (Note for whoever greps next: the raise site is `seg044_01F8`, not the
 `seg044_0395` / seg043 sites -- those really are unreached.)
+
+### Reading a guest function's arguments
+
+`-DCATZ_ARGS_OF='"segNNN_XXXX"' -DCATZ_ARGS_N=<words>` dumps that function's
+arguments on entry, decoding anything that looks like a far pointer into a
+placed selector as a string. A guest call site pushes a 4-byte far return
+frame, so the arguments start at `ss:[sp+4]`, rightmost first -- PASCAL pushes
+left to right, so the LAST parameter is at the lowest address.
+
+It replaces the previous approach of overriding a function to log and then
+reimplementing its body, which is how the Jet-103 arguments were first read and
+is worse in every way.
+
+### Walking down from Bob's `""`
+
+`seg011_17BE` pushes four arguments to the login:
+
+```
+[bp+6]:[bp+8]     SEG_1:5C8C   ""
+[bp+0A]:[bp+0C]   SEG_1:5F74   "Admin"
+[bp+0E]:[bp+10]   <object>+0CAh
+[bp+12]:[bp+14]   ss:&[bp-8]   (out)
+```
+
+`seg011_100F` forwards three of them -- `&out`, `"Admin"`, `""` -- to Jet
+ordinal 103, dropping the object pointer, which the login itself consumed.
+
+Inside, the argument list is passed down through wrappers
+(`seg085_0542` -> `seg085_055C` -> `seg044_0174`, each a straight forward of ten
+to twelve words) and by the time it reaches `seg044_0174` the name argument
+(`[bp+0E]:[bp+10]`) is **already NULL** -- not nulled locally by
+`seg044_01B1`, which takes its already-null branch. `seg044_01CC` hands the
+NULL to `seg046_0442`, which takes its null path (`0482 -> 04A3`), writes
+0xFFFF, and `seg044_01E3` turns that into -1003.
+
+One argument in both frames is worth another look: `seg044_0174` passes
+`[bp+16]:[bp+18]` = **FFFF:0178** to `seg086_028A`. A selector of 0xFFFF is the
+unrelocated-placeholder value, though Jet also uses 0xFFFF as a null ID, so it
+may be an ID rather than a pointer -- `seg086_028A` returns non-zero either way
+and the run continues past it. Worth settling before assuming the NULL name is
+the only problem.
