@@ -68,7 +68,11 @@ int jet_longjmp(CPU *cpu, uint16_t env, uint16_t val)
      * word of argument; longjmp fakes that return, so land on the same sp. */
     cpu->sp = (uint16_t)(sp + 6);
     cpu->ax = val ? val : 1;
-    g_top = i;                          /* everything above is being discarded */
+    /* Keep anchor i: the frame that owns it is the one being jumped INTO, so
+     * it is alive afterwards and a second longjmp to the same jmp_buf is
+     * legal -- Jet does exactly that, retrying an operation from the same
+     * setjmp site. Only the frames above it are gone. */
+    g_top = i + 1;
     longjmp(g_anchors[i].buf, 1);
 }
 

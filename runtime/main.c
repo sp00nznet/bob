@@ -100,7 +100,11 @@ void catz_dump_args(const char *nm)
     static int hits;
     int i;
     if (!g_cpu || strcmp(nm, CATZ_ARGS_OF) != 0) return;
-    fprintf(stderr, "[ARGS] %s #%d sp=%04X ss=%04X\n", nm, ++hits, g_cpu->sp, g_cpu->ss);
+    fprintf(stderr, "[ARGS] %s #%d sp=%04X ss=%04X ds=%04X es=%04X\n"
+                    "       ax=%04X bx=%04X cx=%04X dx=%04X si=%04X di=%04X bp=%04X\n",
+            nm, ++hits, g_cpu->sp, g_cpu->ss, g_cpu->ds, g_cpu->es,
+            g_cpu->ax, g_cpu->bx, g_cpu->cx, g_cpu->dx,
+            g_cpu->si, g_cpu->di, g_cpu->bp);
     for (i = 0; i < CATZ_ARGS_N; i++) {
         uint16_t off = mem_read16(g_cpu, g_cpu->ss, (uint16_t)(g_cpu->sp + 4 + i * 2));
         uint16_t seg = mem_read16(g_cpu, g_cpu->ss, (uint16_t)(g_cpu->sp + 6 + i * 2));

@@ -185,7 +185,13 @@ static inline uint8_t mem_read8(CPU *cpu, uint16_t seg, uint16_t off) {
 static inline void catz_mem_watch(CPU *cpu, uint16_t seg, uint16_t off,
                                   uint32_t val, int width) {
     if (seg != (uint16_t)(CATZ_WATCH_MEM)) return;
-    if ((int)off < (int)(CATZ_WATCH_OFF) - 2 || off > (uint16_t)(CATZ_WATCH_OFF) + 1) return;
+    /* -DCATZ_WATCH_LEN widens this to a range, for watching a struct or an
+     * array slot whose index is not known in advance. */
+#ifndef CATZ_WATCH_LEN
+#define CATZ_WATCH_LEN 2
+#endif
+    if ((int)off < (int)(CATZ_WATCH_OFF) - 2
+        || off >= (uint16_t)((CATZ_WATCH_OFF) + (CATZ_WATCH_LEN))) return;
     fprintf(stderr, "[WATCH_MEM] %u:%04X <- %0*X (w%d sp=%04X ds=%04X es=%04X) ring:",
             seg, off, width * 2, val, width, cpu->sp, cpu->ds, cpu->es);
     for (int i = 12; i > 0; i--) {
