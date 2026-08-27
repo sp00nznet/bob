@@ -118,20 +118,18 @@ MFC's subclass-on-`WM_NCCREATE` through the captured `WH_CALLWNDPROC` hook, so t
 main window ("AfxFrameOrView" / "Daemon") is created and attached
 (`m_hWnd` set, added to MFC's HWND map).
 
-**Current frontier - Jet's DAO login returns 0xFBFC.** Three structural lifter
-problems are fixed: branches leaving a function aimed at a fabricated segment
-(123 sites), the `cmp al, imm8` overlapping-entry idiom had nowhere to land, and
-a guest loop split across two lifted functions was unbounded C recursion until
-`-foptimize-sibling-calls` turned each tail call into a jump. On top of that,
-Jet's setjmp/longjmp now unwinds the **host** stack as well as the guest one -
-restoring the guest sp alone left C frames alive in functions the guest believed
-it had left. With those in place the Access Basic runtime initialises, Jet
-creates and reads its scratch files, and the whole DAO path runs for real:
-InitInstance goes 6,049 -> 11,133 lifted calls and dispatch misses halve.
+**Current frontier - Jet -1003, and three databases nobody opens.** Jet's
+setjmp/longjmp now unwinds the host stack as well as the guest one, and the file
+layer stopped answering yes to everything (a zero-length DOS write sets a file's
+length -- that is how Jet grows a database; AH=43h is how it asks whether a file
+exists; DOS open must not create). Jet takes its scratch databases from nothing
+to 32 KB, raises no errors where it used to raise two, and its first DAO call
+succeeds. InitInstance runs 6,049 -> 13,102 lifted calls.
 
-It still fails, now on Jet's own terms: error `0xFBFC` from the `""`/`"Admin"`
-login, which the engine turns into `0x80040033`. See
-[docs/BRINGUP.md](docs/BRINGUP.md).
+It still returns FALSE. The second Jet call comes back `0xFC15` (-1003) from a
+name lookup that found nothing -- and Bob ships **SYSTEM.MDB**, **UTOPIA.MDB**
+and **UPIC.MDB** which Jet never opens, so the `""`/`"Admin"` login is running
+against an empty scratch file. See [docs/BRINGUP.md](docs/BRINGUP.md).
 
 ### How it lifts (the three modules → one program)
 

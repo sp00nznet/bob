@@ -749,3 +749,62 @@ at `seg24:0xAEEF` by `seg011_0FEF`. `seg011_85B7` tolerates exactly `0xFBFA`
 and turns anything else into `0x80040033`, so the next question is which Jet
 ISAM error 0xFBFC (-1028) is and which of `seg045_01DC` / `seg084_00FF` --
 the last frames before the unwind -- raises it.
+
+## The file layer was answering yes to everything
+
+Three answers were wrong in the same way, and each one hid the next.
+
+**A zero-length DOS write sets the file's length** -- truncating *or extending*
+it. That is how Jet grows a database: `seg061_023A` seeks to `page * 2048`,
+writes zero bytes to move EOF there, seeks to the end and compares. Our AH=40h
+loop wrote nothing for a count of 0 and left the file its old size, so the
+compare failed and the -1808 that came back was remapped to "disk full".
+Nothing in the C library says "set this length"; `_chsize` does.
+
+**AH=43h is how Jet asks whether a file exists.** `seg061_00B6` issues it and
+reads CF-clear as "already there, do not create". A stub that always succeeded
+meant Jet believed its brand-new scratch file was an existing database, skipped
+initialising it, and then rejected the empty file it opened.
+
+**DOS open was creating files.** `fio_open_mode` created on any write mode, so
+AH=3Dh on a missing file quietly produced an empty one -- which answers "yes"
+to every existence question asked by *trying*. Open and create are separate
+now: 3Dh/`_lopen` fail if the file is not there, 3Ch/`_lcreat` truncate, and
+OpenFile honours OF_CREATE.
+
+Jet takes its scratch databases from nothing to 4 KB to 32 KB, raises no errors
+where it used to raise two, and its first DAO call now stores **0** in the
+engine's last-error slot.
+
+### How to find the next one
+
+The longjmp override is the choke point for every Jet error: `push <err>; call
+<longjmp>` is the idiom, so one function sees them all with the raiser still on
+the call ring. Build with `-DELFISH_TRACE_RUNTIME` and read the `[jet] longjmp
+val=... from ...` lines. Errors that are *returned* rather than raised land in
+the engine's slot at `seg24:0xAEEF`; watch it with
+`-DCATZ_WATCH_MEM=24 -DCATZ_WATCH_OFF=0xAEEF`.
+
+## Frontier: Jet -1003, and three databases nobody opens
+
+The DAO login now gets two Jet calls deep. The first succeeds. The second
+returns `0xFC15` (-1003) from `seg044_0395`:
+
+```
+seg044_0395:  cmp word ss:[bp-6], 0FFFEh     ; -2 == "not found"
+              jne 03AA
+              mov si, 0FC15h                 ; -> seg011_85CC -> 0x80040033
+```
+
+So a lookup by name came back not-found. Bob ships **SYSTEM.MDB**,
+**UTOPIA.MDB** and **UPIC.MDB** in the install directory and Jet opens none of
+them -- the only files touched in a run are its own RMS scratch files. Jet is
+doing its `""` / `"Admin"` login against an empty scratch database, so of
+course the account is not there.
+
+The next question is how Bob tells Jet where its workgroup database is.
+GetPrivateProfileString/Int now read real .INI files (they were stubs that
+returned 0 without touching the caller's buffer), but nothing on this path
+consults one yet, so the path is arriving some other way -- most likely as an
+argument to the DAO open that is still empty for the same class of reason the
+`.ldb` name was garbage earlier.

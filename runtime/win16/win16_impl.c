@@ -522,6 +522,85 @@ static void oem_ansi_copy(CPU *cpu) {
 void KEYBOARD_OEMTOANSI(CPU *cpu) { oem_ansi_copy(cpu); }
 void KEYBOARD_ANSITOOEM(CPU *cpu) { oem_ansi_copy(cpu); }
 
+/* ---- private profile (.INI) ----
+ * The stub returned 0 without touching the caller's buffer, so the caller read
+ * whatever was already there. Jet finds its workgroup database through
+ * GetPrivateProfileString, and Bob ships SYSTEM.MDB next to its other data, so
+ * this has to answer from a real file when there is one and hand back the
+ * caller's own default when there is not.
+ * ponytail: a linear scan per call, no cache. These run a handful of times at
+ * startup; cache it if a profile read ever shows up in a hot path. */
+static int ini_lookup(const char *file, const char *sec, const char *key,
+                      char *out, int outsz)
+{
+    char path[320], line[512], want[130];
+    const char *root = getenv("BOB_INSTALL");
+    const char *base = file;
+    const char *p;
+    FILE *f;
+    int in_sec = 0, n;
+
+    if (!file || !*file || !sec || !key) return 0;
+    for (p = file; *p; p++) if (*p == '/' || *p == '\\') base = p + 1;
+    if (!root) root = "game/install";
+    snprintf(path, sizeof path, "%s/%s", root, base);
+    f = fopen(path, "r");
+    if (!f) return 0;
+
+    snprintf(want, sizeof want, "[%s]", sec);
+    while (fgets(line, sizeof line, f)) {
+        char *s = line, *e;
+        while (*s == ' ' || *s == '\t') s++;
+        e = s + strlen(s);
+        while (e > s && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' ')) *--e = 0;
+        if (*s == '[') { in_sec = (_stricmp(s, want) == 0); continue; }
+        if (!in_sec || *s == ';' || !*s) continue;
+        e = strchr(s, '=');
+        if (!e) continue;
+        *e = 0;
+        { char *t = e - 1; while (t >= s && (*t == ' ' || *t == '\t')) *t-- = 0; }
+        if (_stricmp(s, key) != 0) continue;
+        e++;
+        while (*e == ' ' || *e == '\t') e++;
+        n = (int)strlen(e);
+        if (n > outsz - 1) n = outsz - 1;
+        memcpy(out, e, (size_t)n);
+        out[n] = 0;
+        fclose(f);
+        return 1;
+    }
+    fclose(f);
+    return 0;
+}
+
+/* int GetPrivateProfileString(app, key, def, buf, cb, file) */
+void KERNEL_GETPRIVATEPROFILESTRING(CPU *cpu) {
+    char sec[64] = "", key[64] = "", def[256] = "", file[160] = "", val[256] = "";
+    int cb = (int)a16(cpu, 4);
+    uint16_t boff = a16(cpu, 6), bseg = a16(cpu, 8);
+    if (a16(cpu, 20)) read_asciiz(cpu, a16(cpu, 20), a16(cpu, 18), sec, sizeof sec);
+    if (a16(cpu, 16)) read_asciiz(cpu, a16(cpu, 16), a16(cpu, 14), key, sizeof key);
+    if (a16(cpu, 12)) read_asciiz(cpu, a16(cpu, 12), a16(cpu, 10), def, sizeof def);
+    if (a16(cpu, 2))  read_asciiz(cpu, a16(cpu, 2),  a16(cpu, 0),  file, sizeof file);
+    if (!ini_lookup(file, sec, key, val, (int)sizeof val))
+        snprintf(val, sizeof val, "%s", def);
+    if (bseg && cb > 0) write_asciiz(cpu, bseg, boff, val, cb);
+    IMPL_LOG("[win16] GetPrivateProfileString %s [%s] %s -> '%s'\n", file, sec, key, val);
+    cpu->ax = (uint16_t)strlen(val);
+    ret(cpu, 22);
+}
+
+/* UINT GetPrivateProfileInt(app, key, nDefault, file) */
+void KERNEL_GETPRIVATEPROFILEINT(CPU *cpu) {
+    char sec[64] = "", key[64] = "", file[160] = "", val[64] = "";
+    if (a16(cpu, 12)) read_asciiz(cpu, a16(cpu, 12), a16(cpu, 10), sec, sizeof sec);
+    if (a16(cpu, 8))  read_asciiz(cpu, a16(cpu, 8),  a16(cpu, 6),  key, sizeof key);
+    if (a16(cpu, 2))  read_asciiz(cpu, a16(cpu, 2),  a16(cpu, 0),  file, sizeof file);
+    cpu->ax = ini_lookup(file, sec, key, val, (int)sizeof val)
+              ? (uint16_t)atoi(val) : a16(cpu, 4);
+    ret(cpu, 14);
+}
+
 /* ===== KERNEL: module / version / task ===== */
 
 void KERNEL_GETWINFLAGS(CPU *cpu) {         /* DX:AX: WF_PMODE|WF_CPU386|WF_ENHANCED */
