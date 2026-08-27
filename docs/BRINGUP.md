@@ -612,3 +612,72 @@ jmp  seg035_10DF        ; _amsg_exit(R6021)
 instead of terminating, so the CRT falls into the next instruction. The
 message says nothing about the app: WinMain ran, AfxWinMain returned, and
 `exit()` simply failed to be fatal. Read the InitInstance result, not this.
+
+## By-name imports: why the blitter and the Jet login were both dead
+
+`lift_combined.py` used to note that UTOPIA -> UEXTRA imports were "left as
+Win16-style import stubs for now". That was not a cosmetic gap. UTOPIA imports
+UEXTRA **entirely by name**, and a type-2 (import-by-name) NE relocation has no
+ordinal at all -- the field the parser calls `ordinal` is a byte offset into
+the *importing* module's imported names table. Keying `xmod` on it always
+missed, so all 19 fixups fell through to no-op stubs called `UEXTRA_Ord173`.
+
+That silently disabled two unrelated things at once:
+
+- **The whole blitter.** RLETRANSEXPAND, COPYDIBBITS, TRANSCOPYDIBBITS,
+  HMEMSET, RLEPACKDIB, DOSTRETCHTRANSPARENTDIBITS -- every cel-drawing entry
+  point returned 0. Milestones 4 and 5 (first frame, one actor on screen) were
+  blocked on a lookup key.
+- **The Access Basic runtime.** `B$PEND` and `HOLE` bracket the DGROUP template
+  MSABC110 is instantiated from, and `HOLE`'s first word is the size the
+  runtime needs. Unresolved, the engine copied 1470 bytes from segment 0xFFFF
+  into a segment it had sized from a 0 it read at `es:[0xFFFF]`.
+
+Closing it needed three things beyond the name key, each a different place a
+fixup can land:
+
+| Where the fixup sits | Example | Was |
+|---|---|---|
+| mov/push immediate | `mov si, offset B$PEND` | handled, wrong key |
+| arithmetic immediate | `sub ax, offset B$PEND` (ADDITIVE) | not handled at all |
+| memory displacement | `mov ax, es:[offset HOLE]` | not handled at all |
+| a data segment | `seg HOLE` in UTOPIA's DGROUP | gen_image did internal only |
+
+ADDITIVE is the one that reads wrong at a glance: the word already in the
+instruction is an addend to the resolved address, not a chain link.
+
+Including the memory-operand kinds in the fixup pass changes **exactly one
+instruction** across all 199 segments -- diff a lift with and without it if you
+change this again. It is the `mov ax, es:[0x134]` above.
+
+### The shape of the bug it caused
+
+Worth internalising, because it will recur. A single unresolved fixup made
+`GlobalAlloc` ask for 8 KB instead of 21.5 KB. The runtime then copied its
+0x265A-byte template into a segment that also held the stack it was running on,
+so its own return addresses were overwritten -- and the *symptom* was a
+`recomp_dispatch MISS seg=<garbage>` thousands of calls later, in a different
+module. Nothing pointed back at the writer.
+
+`-DCATZ_WATCH_MEM=<seg> -DCATZ_WATCH_OFF=<off>` is the tool for this: it prints
+every write within a couple of bytes of a guest address, with the call ring.
+Reach for it whenever a return address is wrong and the stack pointer is not.
+
+## Frontier: MSABC110's own initialisation
+
+With the above fixed the Access Basic runtime goes from 6 lifted calls to 223.
+It copies its template, initialises, and then fails on its own terms:
+
+```
+seg147_013E:  call seg158_8040          ; AB runtime init
+              or ax, ax
+              jne 01C9                  ; -> failure, unwinds to seg011_837C
+seg158_8040:  call seg158_970F          ; -> 96B2 -> 96D9 -> 8F8D -> seg153/157
+              or ax, ax
+              jne 8056                  ; error
+```
+
+`seg158_970F` returns non-zero and leaves 13 words on the stack, so `seg147_01C9`
+returns through them. Whether the stack imbalance causes the failure or follows
+from it is the first thing to establish. Everything above this line -- the
+UEXTRA resolution, the template copy, the segment sizing -- is now correct.
