@@ -248,13 +248,21 @@ def disassemble_segment(seg: Segment, ne: NEHeader, show_relocs: bool = True) ->
     # (every head is a true instruction boundary IDA already verified).
     seg_ida = load_ida_data(ne).get(str(seg.index))
     if seg_ida and seg_ida.get('heads'):
+        # IDA splits a prefix off into its own head -- `9B DE D9` is listed
+        # as `fwait` at +0 and `fcompp` at +1. The decoder treats FWAIT
+        # before an ESC as the prefix it is and consumes all three, so a
+        # head inside the instruction just decoded is that same
+        # instruction again; decoding it twice pops the FPU stack twice.
         instructions = []
+        end = -1
         for h in seg_ida['heads']:
-            if 0 <= h < len(seg.data):
-                decoder.pos = h
-                inst = decoder.decode_one()
-                if inst is not None:
-                    instructions.append(inst)
+            if h < end or not (0 <= h < len(seg.data)):
+                continue
+            decoder.pos = h
+            inst = decoder.decode_one()
+            if inst is not None:
+                instructions.append(inst)
+                end = h + inst.length
     else:
         instructions = decoder.decode_all()
 
@@ -272,9 +280,15 @@ def disassemble_segment(seg: Segment, ne: NEHeader, show_relocs: bool = True) ->
             raw = inst.raw
             skip = 0
             seg_override = ''
-            if raw[0] in (0x26, 0x2E, 0x36, 0x3E):
-                seg_override = {0x26: 'es', 0x2E: 'cs', 0x36: 'ss', 0x3E: 'ds'}[raw[0]]
-                skip = 1
+            # FWAIT ahead of an ESC belongs to that instruction (the
+            # `fcompp; fstsw [bp-N]; mov ah,[bp-N+1]; sahf` compare idiom
+            # emits it before every one). Step over it, or the ESC opcode
+            # is never found and the whole instruction lifts to nothing.
+            if raw[skip] == 0x9B:
+                skip += 1
+            if raw[skip] in (0x26, 0x2E, 0x36, 0x3E):
+                seg_override = {0x26: 'es', 0x2E: 'cs', 0x36: 'ss', 0x3E: 'ds'}[raw[skip]]
+                skip += 1
             if skip < len(raw) - 1 and 0xD8 <= raw[skip] <= 0xDF:
                 opcode = raw[skip]
                 modrm = raw[skip + 1]

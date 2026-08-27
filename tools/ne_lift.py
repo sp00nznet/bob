@@ -506,7 +506,12 @@ class NELifter(Lifter):
             if 'ax' in operand_str:
                 self._emit(f'cpu->ax = cpu->fpu_status;', orig)
             else:
-                self._emit(f'/* fstsw {operand_str} */', orig)
+                # `fstsw [bp-N]; mov ah,[bp-N+1]; sahf` is MSVC's float
+                # compare. Dropping the store left the caller reading an
+                # uninitialized stack slot, so every such compare branched
+                # on whatever was on the stack.
+                seg, off = self._fpu_mem_expr(inst, operand_str)
+                self._emit(f'mem_write16(cpu, {seg}, {off}, cpu->fpu_status);', orig)
         elif op == 'fdecstp':
             self._emit(f'cpu->fpu_top = (cpu->fpu_top - 1) & 7;', orig)
         elif op == 'fincstp':

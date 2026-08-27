@@ -25145,6 +25145,7 @@ void seg022_28EA(CPU *cpu);
 void seg022_2948(CPU *cpu);
 
 /* seg25 (90 functions) */
+void seg025_0158(CPU *cpu);
 void seg025_0472(CPU *cpu);
 void seg025_0000(CPU *cpu);
 void seg025_0012(CPU *cpu);
@@ -25161,7 +25162,6 @@ void seg025_00C3(CPU *cpu);
 void seg025_00EF(CPU *cpu);
 void seg025_0104(CPU *cpu);
 void seg025_0114(CPU *cpu);
-void seg025_0158(CPU *cpu);
 void seg025_015D(CPU *cpu);
 void seg025_0168(CPU *cpu);
 void seg025_0171(CPU *cpu);
