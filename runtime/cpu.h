@@ -539,4 +539,21 @@ static inline void port_out8(CPU *cpu, uint16_t port, uint8_t val) {
     (void)cpu; (void)port; (void)val;
 }
 
+static inline uint16_t port_in16(CPU *cpu, uint16_t port) {
+    (void)cpu; (void)port;
+    return 0;
+}
+
+static inline void port_out16(CPU *cpu, uint16_t port, uint16_t val) {
+    (void)cpu; (void)port; (void)val;
+}
+
+/* Divide-by-zero guard the lifter emits instead of letting the host take a
+ * real #DE. The 8086 would vector INT 0; Bob never divides by zero on a
+ * correct path, so reaching here means a bad operand upstream -- report it
+ * and leave the quotient registers alone. */
+static inline void catz_div0(const char *what) {
+    fprintf(stderr, "[cpu] divide by zero in %s\n", what);
+}
+
 #endif /* CATZ_CPU_H */
