@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <io.h>       /* _chsize / _fileno: DOS "set file length" */
 
 #ifdef CATZ_TRACE_WIN16
 #define FIO_LOG(...) fprintf(stderr, __VA_ARGS__)
@@ -69,6 +70,20 @@ static int bob_resolve(const char *guest, char *host, int hostsz, int for_read) 
     return 0;
 }
 
+/* A zero-length DOS write sets the file's length to the current position --
+ * truncating or EXTENDING it. Jet grows its database with exactly that:
+ * seg061_023A seeks to page*2048, writes zero bytes, then seeks to the end and
+ * compares. Doing nothing for a count of 0 leaves the file its old size, so
+ * the compare fails, and the -1808 that comes back is remapped to "disk full".
+ * Nothing else in the C library says "set this length", hence _chsize. */
+static void fio_set_eof(FILE *f)
+{
+    long pos = ftell(f);
+    if (pos < 0) return;
+    fflush(f);
+    if (_chsize(_fileno(f), pos) == 0) fseek(f, pos, SEEK_SET);
+}
+
 /* ---- guest-handle -> host FILE* table ---- */
 #define FIO_MIN 5            /* 0..4 reserved (stdin/out/err/aux/prn) */
 #define FIO_MAX 256
@@ -88,15 +103,31 @@ static void fio_close(int h) {
 }
 
 /* mode: 0=read, 1=write, 2=read/write (+create on write/rw) */
-static int fio_open_mode(const char *guest, int mode) {
+/* Does the guest path resolve to a file that exists? */
+static int bob_exists(const char *guest) {
     char host[320];
-    int found = bob_resolve(guest, host, sizeof host, mode == 0);
-    const char *fm = (mode == 0) ? "rb" : (found ? "r+b" : "w+b");
-    FILE *f = fopen(host, fm);
-    if (!f && mode != 0) f = fopen(host, "w+b");
+    return bob_resolve(guest, host, sizeof host, 1);
+}
+
+/* `create` separates DOS open (3Dh) from DOS create (3Ch). Opening a file that
+ * is not there has to FAIL: Jet asks "does this exist?" by trying, and an open
+ * that quietly creates an empty file answers yes to every question. */
+static int fio_open_mode2(const char *guest, int mode, int create) {
+    char host[320];
+    int found = bob_resolve(guest, host, sizeof host, 1);
+    const char *fm;
+    FILE *f;
+    if (create) fm = "w+b";                  /* create/truncate */
+    else if (!found) { FIO_LOG("[file] open '%s' -> not found\n", guest); return -1; }
+    else fm = (mode == 0) ? "rb" : "r+b";
+    f = fopen(host, fm);
     FIO_LOG("[file] open '%s' -> %s mode=%d %s\n", guest, host, mode, f ? "OK" : "FAIL");
     if (!f) return -1;
     return fio_alloc(f);
+}
+
+static int fio_open_mode(const char *guest, int mode) {
+    return fio_open_mode2(guest, mode, 0);
 }
 
 /* ===================== KERNEL HFILE API ===================== */
@@ -112,7 +143,7 @@ void KERNEL__LOPEN(CPU *cpu) {              /* _lopen(lpPathName, iReadWrite) */
 
 void KERNEL__LCREAT(CPU *cpu) {            /* _lcreat(lpPathName, iAttribute) */
     char path[260]; fread_asciiz(cpu, fa16(cpu, 4), fa16(cpu, 2), path, sizeof path);
-    int h = fio_open_mode(path, 2);
+    int h = fio_open_mode2(path, 2, 1);
     cpu->ax = (uint16_t)(h < 0 ? 0xFFFF : h);
     fret(cpu, 6);
 }
@@ -164,7 +195,8 @@ void KERNEL__LWRITE(CPU *cpu) {           /* _lwrite(hFile, lpBuffer, cbWrite) *
     uint16_t cb = fa16(cpu, 0);
     FILE *f = fio_get(h);
     uint16_t n = 0;
-    if (f) for (; n < cb; n++) fputc(mem_read8(cpu, bseg, (uint16_t)(boff + n)), f);
+    if (f && cb == 0) fio_set_eof(f);        /* same rule as the DOS call */
+    else if (f) for (; n < cb; n++) fputc(mem_read8(cpu, bseg, (uint16_t)(boff + n)), f);
     cpu->ax = n;
     fret(cpu, 8);
 }
@@ -197,7 +229,7 @@ void KERNEL_OPENFILE(CPU *cpu) {          /* OpenFile(lpFileName, lpOFSTRUCT, wS
         fret(cpu, 10); return;
     }
     int mode = (style & 3);                 /* OF_READ/WRITE/READWRITE low bits */
-    int h = fio_open_mode(path, mode);
+    int h = fio_open_mode2(path, mode, (style & 0x1000) != 0 /*OF_CREATE*/);
     if (ofseg) {                            /* fill szPathName so callers can re-read it */
         for (int i = 0; i < (int)sizeof(host) && host[i]; i++)
             mem_write8(cpu, ofseg, (uint16_t)(ofoff + 8 + i), (uint8_t)host[i]);
@@ -224,7 +256,7 @@ void KERNEL_DOS3CALL(CPU *cpu) {
     }
     case 0x3C: {                            /* create: CX=attr, DS:DX=name */
         char path[260]; fread_asciiz(cpu, cpu->ds, cpu->dx, path, sizeof path);
-        int h = fio_open_mode(path, 2);
+        int h = fio_open_mode2(path, 2, 1);
         if (h < 0) { cpu->ax = 0x03; cpu->flags |= FLAG_CF; }
         else cpu->ax = (uint16_t)h;
         break;
@@ -243,9 +275,10 @@ void KERNEL_DOS3CALL(CPU *cpu) {
     }
     case 0x40: {                            /* write: BX=handle, CX=count, DS:DX=buf */
         FILE *f = fio_get((int16_t)cpu->bx); uint16_t n = 0;
-        if (f) for (; n < cpu->cx; n++)
+        if (!f) { cpu->ax = 0x06; cpu->flags |= FLAG_CF; break; }
+        if (cpu->cx == 0) { fio_set_eof(f); cpu->ax = 0; break; }
+        for (; n < cpu->cx; n++)
             fputc(mem_read8(cpu, cpu->ds, (uint16_t)(cpu->dx + n)), f);
-        else { cpu->ax = 0x06; cpu->flags |= FLAG_CF; break; }
         cpu->ax = n;
         break;
     }
@@ -275,13 +308,24 @@ void KERNEL_DOS3CALL(CPU *cpu) {
     case 0x47:                              /* get current dir -> empty (root) */
         if (cpu->ds) mem_write8(cpu, cpu->ds, cpu->si, 0);
         break;
-    case 0x43:                              /* get/set file attributes */
-        /* AL=0 get -> CX=attrs; AL=1 set -> succeed. Jet stats its database and
-         * lock file through this before deciding whether to create them. */
-        if ((cpu->ax & 0xFF) == 0) cpu->cx = 0x20;   /* FILE_ATTRIBUTE_ARCHIVE */
-        cpu->ax = cpu->cx;
-        cpu->flags &= ~FLAG_CF;
+    case 0x43: {                            /* get/set file attributes */
+        /* This is how Jet asks whether a file exists -- seg061_00B6 issues
+         * AH=43h and reads CF-clear as "already there, do not create". A stub
+         * that always succeeded meant Jet never created and initialised its
+         * own scratch database, and then rejected the empty file it opened.
+         * AL=1 (set) still just succeeds; nothing here has attributes. */
+        char path[260];
+        int exists;
+        fread_asciiz(cpu, cpu->ds, cpu->dx, path, sizeof path);
+        exists = bob_exists(path);
+        FIO_LOG("[dos] attrs '%s' -> %s\n", path, exists ? "exists" : "NOT FOUND");
+        if (!exists && (cpu->ax & 0xFF) == 0) {
+            cpu->ax = 0x02; cpu->flags |= FLAG_CF;      /* file not found */
+        } else {
+            cpu->cx = 0x20; cpu->ax = cpu->cx; cpu->flags &= ~FLAG_CF;
+        }
         break;
+    }
     case 0x5C:                              /* lock / unlock file region */
         /* Jet takes byte-range locks on the .ldb to coordinate with other
          * Access instances. Nothing else has these files open, so every lock
