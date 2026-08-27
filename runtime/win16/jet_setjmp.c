@@ -1,6 +1,7 @@
 /* jet_setjmp.c - see jet_setjmp.h. */
 #include "runtime_api.h"
 #include "jet_setjmp.h"
+#include "segments.h"   /* SEG_n and the lifted prototypes the overrides call */
 #include <stdio.h>
 
 #ifdef ELFISH_TRACE_RUNTIME

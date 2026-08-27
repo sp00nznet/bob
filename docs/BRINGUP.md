@@ -838,3 +838,43 @@ Jet's own DGROUP carries `system.mdb`, `admin` and `ADMINS` (MSAJT110 NE seg
 run opens `system.mdb`, so either Bob never points Jet at a workgroup file and
 the default unsecured path should be taken, or the pointing happens through a
 call we still get wrong.
+
+### The -1003, pinned down
+
+The login itself **succeeds** -- `seg011_85B7` never runs and `seg011_0FEF`
+stores 0. The failure is in the call the login's success path makes next:
+
+```
+seg011_100F:  push [bp+12h]  ; &out
+              push [bp+0Ah]  ; "Admin"
+              push [bp+6]    ; ""
+              call seg006_3BC6          ; -> Jet stack thunk -> MSAJT110.103
+              mov ds:[0AEEFh], ax       ; <- 0xFC15 lands here
+              mov ds:[0AEF1h], dx
+              or  ax, ds:[0AEEFh]
+              jne 85CC                  ; -> 0x80040033
+```
+
+Dumping the arguments at the thunk (temporarily overriding `seg006_3BC6`,
+which is three instructions) gives:
+
+```
+[jet103] arg3 = 1:5C8C ''
+[jet103] arg2 = 1:5F74 'Admin'
+[jet103] arg1(out) = 40:FF20
+```
+
+Inside ordinal 103 (`seg044_0B6A`), `seg044_01B1` normalises an empty string
+argument to a NULL far pointer, `seg044_01CC` passes it to the name lookup
+`seg046_0442`, and that takes its null path (`0482 -> 04A3`), writes 0xFFFF
+into the caller's result and returns. `seg044_01E3` reads the 0xFFFF as
+"not found" and falls into `seg044_01F8`, which is `mov ax, 0FC15h`.
+
+So the chain is complete and mechanical: **empty string in, -1 out, -1003
+returned, 0x80040033 to MFC.** The open question is whether Bob is right to
+pass `""` -- if Jet is supposed to read that as "no workgroup file, default
+unsecured Admin" then something upstream should be supplying a name we are
+not, and `system.mdb` in Jet's own DGROUP is the likeliest thing it wants.
+
+(Note for whoever greps next: the raise site is `seg044_01F8`, not the
+`seg044_0395` / seg043 sites -- those really are unreached.)

@@ -22,7 +22,12 @@ def main():
     # scanning every .c (incl. generated stubs) so prototypes cover all defs.
     funcs_by_seg = {}
     seen = set()
-    for path in sorted(glob.glob(os.path.join(SRC, '*.c'))):
+    # Guest functions the runtime provides by hand (OVERRIDES in
+    # lift_combined.py) are not in src/, but their callers still need the
+    # prototype -- an implicit declaration is an error in modern C.
+    for path in sorted(glob.glob(os.path.join(SRC, '*.c'))
+                       + glob.glob(os.path.join(ROOT, 'runtime', '*.c'))
+                       + glob.glob(os.path.join(ROOT, 'runtime', 'win16', '*.c'))):
         text = open(path, encoding='utf-8', errors='replace').read()
         for name in DEF_RE.findall(text):
             if name in seen:
