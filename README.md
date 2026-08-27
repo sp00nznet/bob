@@ -118,15 +118,18 @@ MFC's subclass-on-`WM_NCCREATE` through the captured `WH_CALLWNDPROC` hook, so t
 main window ("AfxFrameOrView" / "Daemon") is created and attached
 (`m_hWnd` set, added to MFC's HWND map).
 
-**Current frontier - Jet ordinal 103 gets an empty name.** The DAO login itself
-now **succeeds**. What fails is the call its success path makes next: Bob calls
-MSAJT110.103 with `("", "Admin", &out)`, Jet normalises the empty string to a
-NULL pointer, its name lookup returns -1, and that becomes -1003 -> the
-`0x80040033` MFC sees. The whole chain is pinned down instruction by
-instruction in [docs/BRINGUP.md](docs/BRINGUP.md); the open question is whether
-Bob should be passing a name there (Jet's own DGROUP carries `system.mdb`,
-`admin` and `ADMINS`, and Bob ships SYSTEM.MDB, UTOPIA.MDB and UPIC.MDB that
-nothing opens yet).
+**Current frontier - an empty connect string reaches Jet's ISAM driver table.**
+The DAO login itself now **succeeds**. What fails is the call its success path
+makes next: Bob calls MSAJT110.103 with `("", "Admin", &out)`, and the `""`
+ends up at `seg046_0442` -- which is not a user or database lookup at all but
+the **ISAM connect-string parser** (`ODBC`, `MS Access`, `Installable ISAMs`).
+It answers -1, "I do not recognise this driver", and `seg044_01E3` turns that
+into -1003 -> the `0x80040033` MFC sees.
+
+For a plain native Jet database the connect string is legitimately empty, so
+either something upstream should branch around that lookup, or the argument
+arriving there is not the one the call meant to pass. The chain is documented
+instruction by instruction in [docs/BRINGUP.md](docs/BRINGUP.md).
 
 ### How it lifts (the three modules → one program)
 

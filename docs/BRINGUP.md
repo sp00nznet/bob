@@ -913,9 +913,40 @@ to twelve words) and by the time it reaches `seg044_0174` the name argument
 NULL to `seg046_0442`, which takes its null path (`0482 -> 04A3`), writes
 0xFFFF, and `seg044_01E3` turns that into -1003.
 
-One argument in both frames is worth another look: `seg044_0174` passes
-`[bp+16]:[bp+18]` = **FFFF:0178** to `seg086_028A`. A selector of 0xFFFF is the
-unrelocated-placeholder value, though Jet also uses 0xFFFF as a null ID, so it
-may be an ID rather than a pointer -- `seg086_028A` returns non-zero either way
-and the run continues past it. Worth settling before assuming the NULL name is
-the only problem.
+(The `FFFF:0178` that `seg044_0174` hands `seg086_028A` is **not** an
+unrelocated selector -- `seg086_028A` walks a linked list of 0x3E-byte records
+at `ds:31C2h` comparing a 32-bit key, so `0xFFFF0178` is a key value, not a
+pointer. That thread is closed.)
+
+## The lookup is the ISAM driver table, not an account
+
+`seg046_0442` is not looking up a user or a database. It parses a **connect
+string**: `seg046_046A` scans it for `;` or NUL counting characters into `di`,
+and then dispatches on the length --
+
+```
+di == 9 and matches cs:2Fh "MS Access"   -> the native driver
+di == 4 and matches cs:29h "ODBC"        -> result = 0FFFEh (-2)
+otherwise                                -> search the installable-ISAM list
+di == 0 (the string was empty or NULL)   -> result = 0FFFFh (-1)
+```
+
+MSAJT110 NE seg 6 carries exactly the three strings you would expect next to
+each other: `ODBC`, `MS Access`, `Installable ISAMs`.
+
+That settles what the two sentinels mean, and they are not both errors:
+
+- **-2 is a real answer** ("ODBC"). `seg044_0266` treats it as "not one of the
+  built-ins, go and load it".
+- **-1 means "I do not recognise this ISAM"**, and `seg044_01E3` turns it into
+  -1003.
+
+So the empty string is not being rejected as a missing *name* -- it is being
+rejected as an unrecognised *driver*. Which reframes the question one more
+time: for a plain native Jet database the connect string is legitimately empty,
+so either it should never have reached this lookup, or the argument that
+reaches `seg044_0174` at `[bp+0Eh]` is not the one this call was meant to
+receive. `seg044_01B1` normalising empty to NULL immediately before the call
+means Jet clearly expects to *see* empty here, so the first of those is the
+more likely reading: something upstream should be branching around
+`seg044_01CC` and is not.
