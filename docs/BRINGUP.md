@@ -950,3 +950,49 @@ receive. `seg044_01B1` normalising empty to NULL immediately before the call
 means Jet clearly expects to *see* empty here, so the first of those is the
 more likely reading: something upstream should be branching around
 `seg044_01CC` and is not.
+
+## `IMUL r16, r/m16, imm` is three operands
+
+Chasing the -1003 down to Jet's ISAM slot allocator turned up a real lifter
+bug rather than a Jet one.
+
+`seg084_0022` allocates a slot: `seg084_0000` builds a free list of ten
+0x19E-byte records, `seg084_0033` reads the free-list head into `[bp-2]`, and
+`seg084_003A` indexes the table with
+
+```
+69 5E FE 9E 01     imul bx, word ptr [bp-2], 019Eh
+```
+
+That is the 80186 **three-operand** IMUL: the destination is write-only.
+decode16 was discarding the r/m operand and keeping only (reg, imm), so the
+lifter emitted `bx = bx * 19Eh` -- and bx still held 0x50B4, left over from the
+free-list loop. The slot was initialised at a garbage offset, so the
+`"system.mdb"` that `seg084_003A` copies from `ds:3Bh` into the slot's name
+field never landed at `[si+50D0h]`, and every later ISAM lookup saw an empty
+name.
+
+The r/m operand now goes in `op3`, leaving the immediate in `op2` so the
+ordinary two-operand form is untouched, and the lifter reads `op3` as the
+source when present. **762 instructions across Bob changed.** Both forms are
+covered: the memory source above, and the register source in `seg086_02EC`
+(`imul si, bx, 3Eh`), which walks a hash chain and was previously squaring its
+own index.
+
+This is the kind of bug the differential harness exists for; it survived this
+long because nothing had executed that code before the Jet layer came alive.
+
+## Frontier: a circular list in Jet's hash chain
+
+With the multiply fixed the run reaches an order of magnitude more Jet code
+(38k trace lines -> 505k) and then spins in `seg086_02EC`/`seg086_0304`, a
+walk of the chain at `ds:31F8h` that never reaches its 0xFFFF terminator. The
+chain is circular, so something is still building it wrong.
+
+Upstream of that, six `[jet] longjmp ... with no anchor` remain. The anchor
+stack no longer discards the anchor it jumps into (a second longjmp to the same
+jmp_buf is legal, and Jet retries operations from one setjmp site), but a
+longjmp raised from inside another longjmp's aftermath still finds nothing --
+the ring shows `seg072_421A seg073_0010 ... seg073_0000 seg072_421A`. Whether
+the circular chain is a consequence of those failed unwinds or independent of
+them is the first thing to establish.
