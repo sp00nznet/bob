@@ -808,3 +808,33 @@ returned 0 without touching the caller's buffer), but nothing on this path
 consults one yet, so the path is arriving some other way -- most likely as an
 argument to the DAO open that is still empty for the same class of reason the
 `.ldb` name was garbage earlier.
+
+### What the -1003 is not
+
+Worth writing down so the next pass does not re-run these:
+
+- **It is not a literal in the lift.** All eight `mov ax/si, 0FC15h` sites
+  across seg043/seg044 are unreached, so Jet computes the code or maps it
+  through a table. Do not grep for the constant.
+- **The scratch database is written, not just sized.** Two 2048-byte pages go
+  in through DOS AH=40h before it is grown to 32 KB; the file ends up with only
+  eight non-zero bytes because a fresh Jet page really is nearly all zeros
+  (`"Temp"` lands at 0x406). That is the database name, so the format code is
+  running.
+- **`seg011_0FEF` runs twice.** The first call stores **0** in the engine's
+  error slot -- it succeeds. The second stores 0xFC15. Whatever the second call
+  is, it is the one to identify; the trace reaches it through
+  `seg044_0CAF -> 0D7E -> ... -> 0D8D -> 0D9E -> 0E0E`, and by `seg044_0D49`
+  (`or si,si; jl`) the error is already in si, so it comes from a callee below
+  that.
+- **`seg011_181F` is the success continuation** of the login and it builds the
+  path to `UTOPIA.MDB` (`seg011_1833` appends the name from `seg24:0x7A86`). So
+  Bob does not open its real database until the workspace exists -- fixing the
+  login is what unblocks the data layer, not the other way round.
+
+Jet's own DGROUP carries `system.mdb`, `admin` and `ADMINS` (MSAJT110 NE seg
+106, global 146, at 0x3B/0x12/0x1E), and the ISAM system-table names
+(`MSysObjects`, `MSysAccounts`, `MSysACEs`, ...) sit in NE seg 7. Nothing in a
+run opens `system.mdb`, so either Bob never points Jet at a workgroup file and
+the default unsecured path should be taken, or the pointing happens through a
+call we still get wrong.

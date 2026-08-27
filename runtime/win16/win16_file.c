@@ -195,6 +195,7 @@ void KERNEL__LWRITE(CPU *cpu) {           /* _lwrite(hFile, lpBuffer, cbWrite) *
     uint16_t cb = fa16(cpu, 0);
     FILE *f = fio_get(h);
     uint16_t n = 0;
+    FIO_LOG("[win16] _lwrite h=%d n=%u at %ld\n", h, cb, f ? ftell(f) : -1L);
     if (f && cb == 0) fio_set_eof(f);        /* same rule as the DOS call */
     else if (f) for (; n < cb; n++) fputc(mem_read8(cpu, bseg, (uint16_t)(boff + n)), f);
     cpu->ax = n;
@@ -228,6 +229,7 @@ void KERNEL_OPENFILE(CPU *cpu) {          /* OpenFile(lpFileName, lpOFSTRUCT, wS
         FIO_LOG("[file] OpenFile(OF_EXIST) '%s' -> %s\n", path, found ? "yes" : "NO");
         fret(cpu, 10); return;
     }
+    FIO_LOG("[file] OpenFile '%s' style=%04X\n", path, style);
     int mode = (style & 3);                 /* OF_READ/WRITE/READWRITE low bits */
     int h = fio_open_mode2(path, mode, (style & 0x1000) != 0 /*OF_CREATE*/);
     if (ofseg) {                            /* fill szPathName so callers can re-read it */
@@ -277,6 +279,7 @@ void KERNEL_DOS3CALL(CPU *cpu) {
         FILE *f = fio_get((int16_t)cpu->bx); uint16_t n = 0;
         if (!f) { cpu->ax = 0x06; cpu->flags |= FLAG_CF; break; }
         if (cpu->cx == 0) { fio_set_eof(f); cpu->ax = 0; break; }
+        FIO_LOG("[dos] write h=%d n=%u at %ld\n", cpu->bx, cpu->cx, ftell(f));
         for (; n < cpu->cx; n++)
             fputc(mem_read8(cpu, cpu->ds, (uint16_t)(cpu->dx + n)), f);
         cpu->ax = n;
