@@ -118,18 +118,15 @@ MFC's subclass-on-`WM_NCCREATE` through the captured `WH_CALLWNDPROC` hook, so t
 main window ("AfxFrameOrView" / "Daemon") is created and attached
 (`m_hWnd` set, added to MFC's HWND map).
 
-**Current frontier - Jet -1003, and three databases nobody opens.** Jet's
-setjmp/longjmp now unwinds the host stack as well as the guest one, and the file
-layer stopped answering yes to everything (a zero-length DOS write sets a file's
-length -- that is how Jet grows a database; AH=43h is how it asks whether a file
-exists; DOS open must not create). Jet takes its scratch databases from nothing
-to 32 KB, raises no errors where it used to raise two, and its first DAO call
-succeeds. InitInstance runs 6,049 -> 13,102 lifted calls.
-
-It still returns FALSE. The second Jet call comes back `0xFC15` (-1003) from a
-name lookup that found nothing -- and Bob ships **SYSTEM.MDB**, **UTOPIA.MDB**
-and **UPIC.MDB** which Jet never opens, so the `""`/`"Admin"` login is running
-against an empty scratch file. See [docs/BRINGUP.md](docs/BRINGUP.md).
+**Current frontier - Jet ordinal 103 gets an empty name.** The DAO login itself
+now **succeeds**. What fails is the call its success path makes next: Bob calls
+MSAJT110.103 with `("", "Admin", &out)`, Jet normalises the empty string to a
+NULL pointer, its name lookup returns -1, and that becomes -1003 -> the
+`0x80040033` MFC sees. The whole chain is pinned down instruction by
+instruction in [docs/BRINGUP.md](docs/BRINGUP.md); the open question is whether
+Bob should be passing a name there (Jet's own DGROUP carries `system.mdb`,
+`admin` and `ADMINS`, and Bob ships SYSTEM.MDB, UTOPIA.MDB and UPIC.MDB that
+nothing opens yet).
 
 ### How it lifts (the three modules → one program)
 
