@@ -170,8 +170,6 @@ void KERNEL_FREESELECTOR(CPU *cpu) { (void)cpu; WIN16_LOG("FREESELECTOR"); cpu->
 void KERNEL_GETCODEHANDLE(CPU *cpu) { (void)cpu; WIN16_LOG("GETCODEHANDLE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("GETCODEHANDLE"); }
 void KERNEL_GETDRIVETYPE(CPU *cpu) { (void)cpu; WIN16_LOG("GETDRIVETYPE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("GETDRIVETYPE"); }
 void KERNEL_GETMODULEHANDLE(CPU *cpu) { (void)cpu; WIN16_LOG("GETMODULEHANDLE"); cpu->ax = 0; cpu->sp += 4 + 4; }
-void KERNEL_GETPRIVATEPROFILEINT(CPU *cpu) { (void)cpu; WIN16_LOG("GETPRIVATEPROFILEINT"); cpu->ax = 0; cpu->sp += 4 + 14; }
-void KERNEL_GETPRIVATEPROFILESTRING(CPU *cpu) { (void)cpu; WIN16_LOG("GETPRIVATEPROFILESTRING"); cpu->ax = 0; cpu->sp += 4 + 22; }
 void KERNEL_GETTEMPDRIVE(CPU *cpu) { (void)cpu; WIN16_LOG("GETTEMPDRIVE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("GETTEMPDRIVE"); }
 void KERNEL_GLOBALDOSALLOC(CPU *cpu) { (void)cpu; WIN16_LOG("GLOBALDOSALLOC"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("GLOBALDOSALLOC"); }
 void KERNEL_GLOBALDOSFREE(CPU *cpu) { (void)cpu; WIN16_LOG("GLOBALDOSFREE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("GLOBALDOSFREE"); }
