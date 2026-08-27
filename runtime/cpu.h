@@ -45,6 +45,11 @@ void catz_sp_check(const char *nm);
 void catz_ds_check(const char *nm);
 #define TRACE_FN(n) do { g_fn_ring[(g_fn_ring_pos++) & (CATZ_FN_RING_SIZE-1)] = (n); \
     catz_ds_check(n); } while (0)
+#elif defined(CATZ_ARGS_OF)
+/* Argument dump for one named function -- see catz_dump_args in main.c. */
+void catz_dump_args(const char *nm);
+#define TRACE_FN(n) do { g_fn_ring[(g_fn_ring_pos++) & (CATZ_FN_RING_SIZE-1)] = (n); \
+    catz_dump_args(n); } while (0)
 #elif defined(CATZ_TRACE_FN)
 /* Guest sp stands in for call depth: every lifted call pushes a return
  * frame, so a smaller sp is deeper. Without it the trace is a flat list

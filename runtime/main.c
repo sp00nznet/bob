@@ -84,9 +84,50 @@ void dump_fn_ring(int n)
     fprintf(stderr, "--- end (total calls=%u) ---\n", g_fn_ring_pos);
 }
 
+#ifdef CATZ_ARGS_OF
+/* Dump one function's arguments on entry, as both words and (where they look
+ * like far pointers) strings. Build with
+ *   -DCATZ_ARGS_OF='"seg044_0174"' -DCATZ_ARGS_N=10
+ * A guest call site pushes a 4-byte far return frame, so the arguments start
+ * at ss:[sp+4], rightmost first -- PASCAL pushes left to right.
+ * The alternative is overriding the function to log and then reimplementing
+ * its body, which is how the last two of these were done and is worse. */
+#ifndef CATZ_ARGS_N
+#define CATZ_ARGS_N 8
+#endif
+void catz_dump_args(const char *nm)
+{
+    static int hits;
+    int i;
+    if (!g_cpu || strcmp(nm, CATZ_ARGS_OF) != 0) return;
+    fprintf(stderr, "[ARGS] %s #%d sp=%04X ss=%04X\n", nm, ++hits, g_cpu->sp, g_cpu->ss);
+    for (i = 0; i < CATZ_ARGS_N; i++) {
+        uint16_t off = mem_read16(g_cpu, g_cpu->ss, (uint16_t)(g_cpu->sp + 4 + i * 2));
+        uint16_t seg = mem_read16(g_cpu, g_cpu->ss, (uint16_t)(g_cpu->sp + 6 + i * 2));
+        fprintf(stderr, "   +%02X = %04X", 4 + i * 2, off);
+        /* A plausible far pointer is one whose high word is a selector we
+         * actually placed; anything else is just a word. */
+        if (seg && seg < 228 && SEG_SEGMENT_BASE[seg]) {
+            char b[48];
+            int k = 0;
+            for (; k < (int)sizeof b - 1; k++) {
+                uint8_t c = mem_read8(g_cpu, seg, (uint16_t)(off + k));
+                if (!c) break;
+                b[k] = (c >= 32 && c < 127) ? (char)c : '.';
+            }
+            b[k] = 0;
+            fprintf(stderr, "   (as %u:%04X -> '%s')", seg, off, b);
+        }
+        fprintf(stderr, "\n");
+    }
+    fflush(stderr);
+}
+#endif
+
 #ifdef CATZ_WATCH_DS
 /* Print the first function entered with ds == CATZ_WATCH_DS (the bad segment),
  * with a backtrace, to pinpoint where the corruption first lands in DS. */
+
 void catz_ds_check(const char *nm)
 {
     static int fired = 0;
