@@ -275,6 +275,12 @@ def main():
         elif u in ('GETMODULEHANDLE','GETCURRENTINSTANCE','GETMODULEUSAGE'):
             wr('ax', SEL(dgrp))
         elif u in ('GETVERSION',): wr('ax', 0x0A03)
+        elif u == 'GETDOSENVIRONMENT':
+            # empty env (double-NUL) in a fresh segment -> DX:AX far ptr
+            idx = st.setdefault('hsel', 0x800); st['hsel'] += 1
+            hb = st.setdefault('hbase', HEAP_BASE); st['hbase'] += 0x10000
+            uc.mem_write(GDT_ADDR + idx * 8, descr(hb, 0xF2)); uc.mem_write(hb, bytes([0, 0]))
+            wr('dx', idx << 3); wr('ax', 0)
         elif u in ('GLOBALALLOC', 'LOCALALLOC', 'ALLOCSELECTOR'):
             # real bump allocator: a fresh EVEN selector (idx<<3) whose GDT
             # descriptor points at a fresh 64 KB region -> matches the recomp
