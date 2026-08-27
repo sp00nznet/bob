@@ -118,13 +118,19 @@ MFC's subclass-on-`WM_NCCREATE` through the captured `WH_CALLWNDPROC` hook, so t
 main window ("AfxFrameOrView" / "Daemon") is created and attached
 (`m_hWnd` set, added to MFC's HWND map).
 
-**Current frontier - MSABC110's own initialisation.** UTOPIA imports UEXTRA
-entirely *by name*, and by-name NE fixups carry a names-table offset rather than
-an ordinal, so all 19 of them resolved to no-op stubs. That one lookup key had
-disabled the whole blitter (`RLETRANSEXPAND`, `COPYDIBBITS`, `HMEMSET`, ...) and
-the Access Basic runtime's DGROUP template at once. With it fixed, MSABC110 goes
-from 6 lifted calls to 223 - it copies its template, initialises, and fails
-inside its own `seg158_970F`. Chasing that is the next step; see
+**Current frontier - Jet's DAO login returns 0xFBFC.** Three structural lifter
+problems are fixed: branches leaving a function aimed at a fabricated segment
+(123 sites), the `cmp al, imm8` overlapping-entry idiom had nowhere to land, and
+a guest loop split across two lifted functions was unbounded C recursion until
+`-foptimize-sibling-calls` turned each tail call into a jump. On top of that,
+Jet's setjmp/longjmp now unwinds the **host** stack as well as the guest one -
+restoring the guest sp alone left C frames alive in functions the guest believed
+it had left. With those in place the Access Basic runtime initialises, Jet
+creates and reads its scratch files, and the whole DAO path runs for real:
+InitInstance goes 6,049 -> 11,133 lifted calls and dispatch misses halve.
+
+It still fails, now on Jet's own terms: error `0xFBFC` from the `""`/`"Admin"`
+login, which the engine turns into `0x80040033`. See
 [docs/BRINGUP.md](docs/BRINGUP.md).
 
 ### How it lifts (the three modules → one program)
