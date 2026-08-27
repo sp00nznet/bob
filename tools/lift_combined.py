@@ -59,12 +59,17 @@ MODULES = [
 # the off=FFFF sentinel misses are intentional returns and are excluded).
 # {global_seg: [offsets]}. Re-collect after each round as InitInstance advances.
 FORCE_PROMOTE = {
-    2:  [0x05E9,           # OLE IDispatch method (seg021_004B vtable+0xC)
+    2:  [0x1F76,
+        0x05E9,           # OLE IDispatch method (seg021_004B vtable+0xC)
         0x083E],           # OLE sub-object Release (vtable+0x8); the unresolved
                            # stub had no retf -> -4 stack imbalance corrupted the
                            # caller's saved DS (read sub-obj seg 230 instead of
                            # DGROUP 24), breaking the Jet-context word_D2B13 store.
-    7:  [0x099E],
+    7:  [0x099E,
+        0x0379,
+        0x06B9],       # reached only once the seg2/11/13 round above resolved
+                           # -- each promoted method uncovers the next vtable behind it.
+    8:  [0x1E1E],
     11: [0x13EF],
     13: [0x681A],
 }
