@@ -681,3 +681,71 @@ seg158_8040:  call seg158_970F          ; -> 96B2 -> 96D9 -> 8F8D -> seg153/157
 returns through them. Whether the stack imbalance causes the failure or follows
 from it is the first thing to establish. Everything above this line -- the
 UEXTRA resolution, the template copy, the segment sizing -- is now correct.
+
+## setjmp/longjmp: the guest stack is not the only stack
+
+MSAJT110 unwinds errors with setjmp/longjmp -- `seg072_41EF` is setjmp,
+`seg072_421A`/`4224` is longjmp, over a jmp_buf of
+
+```
+[0]=bp  [2]=di  [4]=si  [6]=sp  [8]=ip  [A]=cs      (near, in SS)
+```
+
+The lifted longjmp restores the guest sp and `retf`s, and that is not enough.
+Every guest frame has a real C frame behind it, and longjmp has to discard the
+ones between itself and the setjmp site. Returning instead lands in the middle
+of C functions the guest believes it has left, which carry on with a stack that
+moved underneath them. Fourteen of those per run; the last one landed five
+calls before the Jet page loop the run had been hanging in, and its 32-bit
+bounds were exactly what the failed unwind left behind.
+
+The C stack is now unwound with the host's own longjmp. The awkward part is
+where the anchor lives: **the frame that CALLS setjmp**, because that is the
+frame the guest returns to. A helper cannot plant it -- its own frame is gone
+by the time anyone jumps there -- so `JET_SETJMP` is a macro the lifter wraps
+around each of the 167 setjmp call sites:
+
+```c
+if (JET_SETJMP(cpu) == 0) { push16(cpu, cpu->cs); push16(cpu, 0xFFFF);
+                            seg072_41EF(cpu); }
+```
+
+Anchors match a jmp_buf by guest sp: the call site pushed a 4-byte far frame
+before entering setjmp, so the anchor sits 4 above the sp the buffer recorded.
+An anchor whose frame returned normally leaves no hook to remove it, so a push
+first drops anchors below the current sp in the same stack. An unmatched
+longjmp falls back to the lifted behaviour and logs, rather than jumping wild.
+
+`OVERRIDES` in lift_combined.py is the general form of the other half: guest
+functions the runtime replaces by hand. They are skipped by the lift and are no
+longer stubbed by gen_stubs.
+
+### Two things this made possible
+
+**A guest loop split across two lifted functions is unbounded C recursion.**
+`seg057_0926` and `seg057_0940` are the two halves of one Jet loop and tail-call
+each other. Build with `-foptimize-sibling-calls` and each `f(cpu); return;`
+compiles to a jump, so the loop stays flat. The flag is load-bearing, not an
+optimisation -- it is in build.sh and CMakeLists.txt for that reason.
+
+**`3C 58` is two instructions depending on where you enter it.** `cmp al, 58h`
+falling through, `pop ax` entered one byte in. MSC uses it to give a shared
+epilogue two entries, and only one reading can be an instruction head, so a
+branch to the other had nowhere to land -- lift16's fallback aimed it at
+`(abs >> 4, abs & 0xF)` of a file-absolute address, a segment that does not
+exist. `ne_decode.decode_alt_entries` decodes such a target as its own stream
+and lifts it as its own function. 123 sites, now zero.
+
+## Frontier: Jet returns 0xFBFC from the DAO login
+
+Bob's OLE init (`seg002_7BEC`) still fails at the same branch, but everything
+under it is now real: the Access Basic runtime initialises, Jet allocates,
+creates and reads its RMS scratch files, hits an error, frees all fifteen of
+its global handles, and returns cleanly. InitInstance runs 6,049 -> 11,133
+lifted calls.
+
+The error itself is `ax = 0xFBFC`, stored to the engine's last-Jet-error slot
+at `seg24:0xAEEF` by `seg011_0FEF`. `seg011_85B7` tolerates exactly `0xFBFA`
+and turns anything else into `0x80040033`, so the next question is which Jet
+ISAM error 0xFBFC (-1028) is and which of `seg045_01DC` / `seg084_00FF` --
+the last frames before the unwind -- raises it.
