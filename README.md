@@ -118,20 +118,14 @@ MFC's subclass-on-`WM_NCCREATE` through the captured `WH_CALLWNDPROC` hook, so t
 main window ("AfxFrameOrView" / "Daemon") is created and attached
 (`m_hWnd` set, added to MFC's HWND map).
 
-**Current frontier — the Jet/DAO workspace login.** Every engine OLE
-Automation vtable InitInstance dispatches through is now promoted and lands in
-lifted code (the host-phase `dispatch_far` miss list is empty). InitInstance
-still returns FALSE, and the reason is now a single legible branch: the engine
-performs Bob's DAO default login — workspace `""`, user `"Admin"`, no password
-— and Jet refuses it, so `seg011_17FC` manufactures `0x80040033` and Bob's OLE
-init releases its (never-created) object and gives up. The remaining work is the
-**Jet/DAO data layer**, which is exactly what MSAJT110/MSABC110/MSAES110 were
-lifted for — not more OLE plumbing. See docs/BRINGUP.md for the trace.
-
-(The `FatalAppExit "no main procedure"` line at the end of a run is noise:
-WinMain runs and returns, and the CRT's `exit()` bottoms out in an `INT 21h/4Ch`
-shim that returns instead of terminating, so the startup falls into its R6021
-message. Read the InitInstance result, not that line.)
+**Current frontier - MSABC110's own initialisation.** UTOPIA imports UEXTRA
+entirely *by name*, and by-name NE fixups carry a names-table offset rather than
+an ordinal, so all 19 of them resolved to no-op stubs. That one lookup key had
+disabled the whole blitter (`RLETRANSEXPAND`, `COPYDIBBITS`, `HMEMSET`, ...) and
+the Access Basic runtime's DGROUP template at once. With it fixed, MSABC110 goes
+from 6 lifted calls to 223 - it copies its template, initialises, and fails
+inside its own `seg158_970F`. Chasing that is the next step; see
+[docs/BRINGUP.md](docs/BRINGUP.md).
 
 ### How it lifts (the three modules → one program)
 
