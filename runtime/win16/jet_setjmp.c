@@ -81,6 +81,14 @@ static void jet_do_longjmp(CPU *cpu)
     cpu->bp = cpu->sp;
     val = mem_read16(cpu, cpu->ss, (uint16_t)(cpu->bp + 4));
     env = mem_read16(cpu, cpu->ss, (uint16_t)(cpu->bp + 6));
+    /* Jet raises an error by longjmping with it as the value, so this is the
+     * one place every Jet error passes through with its raiser still on the
+     * call ring. `push 0xFBFC; call <longjmp>` is the idiom. */
+    JMP_LOG("[jet] longjmp val=%04X env=%04X from", val, env);
+    { int _i; for (_i = 6; _i > 0; _i--) {
+        const char *n = g_fn_ring[(g_fn_ring_pos - (unsigned)_i) & (CATZ_FN_RING_SIZE - 1)];
+        if (n) JMP_LOG(" %s", n); } }
+    JMP_LOG("\n");
     jet_longjmp(cpu, env, val);          /* does not return when it matches */
 
     /* No anchor: the setjmp site is not on the C stack any more. Nothing sane
