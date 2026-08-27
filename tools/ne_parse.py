@@ -118,6 +118,8 @@ class NEHeader:
     segments: list = field(default_factory=list)       # List[Segment]
     entries: list = field(default_factory=list)         # List[EntryPoint]
     module_names: list = field(default_factory=list)    # Imported module names
+    import_names_base: int = 0   # abs file offset of the imported names table;
+                                 # an IMPORT_NAME fixup's `ordinal` is an offset into it
     resident_names: list = field(default_factory=list)  # (name, ordinal) pairs
     nonresident_names: list = field(default_factory=list)
 
@@ -260,6 +262,7 @@ def parse_ne(filepath: str) -> NEHeader:
     # --- Module Reference Table + Import Name Table ---
     modref_base = ne.ne_offset + modref_table_off
     import_base = ne.ne_offset + import_table_off
+    ne.import_names_base = import_base
     for i in range(mod_ref_count):
         name_off = struct.unpack_from('<H', data, modref_base + i * 2)[0]
         abs_off = import_base + name_off
@@ -338,6 +341,20 @@ def parse_ne(filepath: str) -> NEHeader:
             entry.name = name_map[entry.ordinal]
 
     return ne
+
+
+def import_name(ne: NEHeader, name_off: int) -> str:
+    """Resolve an IMPORT_NAME fixup's target name.
+
+    A type-2 (import-by-name) relocation does not carry an ordinal -- its
+    `ordinal` field is a byte offset into this module's imported names table,
+    where the name sits as a length-prefixed string. Reading it as an ordinal
+    is what produced import stubs called UEXTRA_Ord173."""
+    d, p = ne.raw_data, ne.import_names_base + name_off
+    if not ne.import_names_base or p >= len(d):
+        return ''
+    n = d[p]
+    return d[p + 1:p + 1 + n].decode('ascii', errors='replace')
 
 
 def print_summary(ne: NEHeader):

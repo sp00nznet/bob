@@ -42,7 +42,10 @@ def implemented_names():
 
 # Modules that are other lifted recomp modules, not Win16 shims: their imports
 # are cross-module calls resolved directly by the lifter, so no stub is emitted.
-CROSS_MODULES = {'CATZDLL'}
+CROSS_MODULES = {'CATZDLL', 'UEXTRA', 'UTOPIA', 'MSAJT110', 'MSABC110', 'MSAES110'}
+# Emitting a stub for these too is not merely redundant: an import that fails
+# to resolve then calls the stub and returns 0 in silence. With no stub it is
+# a link error, which is what a missing cross-module call should be.
 
 
 def collect_imports(ne, seen):

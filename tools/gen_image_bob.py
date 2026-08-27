@@ -22,7 +22,7 @@ Run: py -3.11 tools/gen_image_bob.py
 import os, sys, struct
 
 sys.path.insert(0, os.path.dirname(__file__))
-from ne_parse import parse_ne
+from ne_parse import parse_ne, import_name
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 G = lambda *p: os.path.join(ROOT, 'game', 'install', *p)
@@ -56,13 +56,47 @@ def chain_offsets(seg, r):
     return offs
 
 
-def apply_internal(image, base, image_size, segs, max_index):
+def build_xmod(mods):
+    """{MODULE: {ordinal|NAME: (global_seg, offset)}} -- same shape as"""
+    """lift_combined's, so a data fixup naming another lifted module"""
+    """resolves the same way a code one does."""
+    xmod = {}
+    for ne, off in mods:
+        mod = os.path.basename(ne.filename).rsplit('.', 1)[0].upper()
+        m = {}
+        for e in ne.entries:
+            m[e.ordinal] = (e.segment + off, e.offset)
+            if e.name:
+                m[e.name.upper()] = (e.segment + off, e.offset)
+        xmod[mod] = m
+    return xmod
+
+
+def apply_relocs(image, base, image_size, mods, max_index, xmod):
     applied = 0
-    for s in segs:
+    for ne, _off in mods:
+      for s in ne.segments:
         for r in s.relocations:
-            if (r.flags & 3) != 0:                 # internal only
+            tt = r.flags & 3
+            if tt == 0:
+                tseg, toff = r.target_seg, r.target_off
+            elif tt in (1, 2):
+                # An import fixup naming another LIFTED module is just an
+                # internal one in disguise. The lifter resolves these in
+                # code; a data segment holding e.g. `seg UEXTRA.HOLE` kept
+                # the 0xFFFF placeholder, and the engine loaded 0xFFFF as a
+                # selector. Imports of real Win16 modules stay untouched --
+                # those are shims, not guest memory.
+                mod = (ne.module_names[r.module_idx - 1].upper()
+                       if r.module_idx <= len(ne.module_names) else '')
+                key = (import_name(ne, r.ordinal).upper() if tt == 2
+                       else r.ordinal)
+                t = xmod.get(mod, {}).get(key)
+                if t is None:
+                    continue
+                tseg, toff = t
+            else:
                 continue
-            tseg = r.target_seg
             if tseg == 0xFF or not (1 <= tseg <= max_index):
                 continue
             for off in chain_offsets(s, r):
@@ -72,12 +106,12 @@ def apply_internal(image, base, image_size, segs, max_index):
                 if r.src_type == 2:                # SELECTOR
                     struct.pack_into('<H', image, addr, tseg)
                 elif r.src_type == 5:              # OFFSET16
-                    struct.pack_into('<H', image, addr, r.target_off & 0xFFFF)
+                    struct.pack_into('<H', image, addr, toff & 0xFFFF)
                 elif r.src_type == 3 and addr + 3 < image_size:    # FAR_PTR
-                    struct.pack_into('<H', image, addr, r.target_off & 0xFFFF)
+                    struct.pack_into('<H', image, addr, toff & 0xFFFF)
                     struct.pack_into('<H', image, addr + 2, tseg)
                 elif r.src_type == 11 and addr + 5 < image_size:   # PTR48
-                    struct.pack_into('<I', image, addr, r.target_off & 0xFFFFFFFF)
+                    struct.pack_into('<I', image, addr, toff & 0xFFFFFFFF)
                     struct.pack_into('<H', image, addr + 4, tseg)
                 else:
                     continue
@@ -138,7 +172,8 @@ def main():
         if s.data:
             image[base[s.index]:base[s.index] + len(s.data)] = s.data
 
-    applied = apply_internal(image, base, image_size, all_segs, max_index)
+    applied = apply_relocs(image, base, image_size, mods, max_index,
+                           build_xmod(mods))
 
     out_dir = os.path.join(ROOT, 'build_data')
     os.makedirs(out_dir, exist_ok=True)
@@ -179,7 +214,7 @@ def main():
         f.write('\n'.join(hdr) + '\n')
 
     print(f'image: {image_size} bytes ({image_size/1048576:.2f} MB), segs 1..{max_index}, '
-          f'internal relocs applied={applied}')
+          f'relocs applied={applied}')
     print(f'host entry seg{entry_seg}:0x{host.ip:04X}  stack seg{stack_seg}:0x{host.sp:04X}  '
           f'host-data seg{host_data}  engine-data seg{eng_data}  engine-entry seg{engine.cs}:0x{engine.ip:04X}')
 

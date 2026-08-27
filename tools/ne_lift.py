@@ -22,10 +22,16 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from decode16 import Decoder, Instruction, OpType, Operand, REG16_NAMES
 from lift16 import Lifter, _read, _write, _reg16, _sreg, _mem_addr, _label
-from ne_parse import parse_ne, NEHeader, Segment
+from ne_parse import parse_ne, NEHeader, Segment, import_name
 from ne_decode import disassemble_segment, build_reloc_map
 from fpu_decode import decode_fpu, format_fpu
 from win16 import get_import, module_name, is_fpu_module
+
+
+# Operand kinds a fixup can land on. Including the memory forms changes
+# exactly one instruction across all 199 segments -- the one below -- so
+# it is targeted, not a broad rewrite.
+_RELOC_OPERANDS = (OpType.IMM8, OpType.IMM16, OpType.MEM, OpType.MOFFS)
 
 
 class NELifter(Lifter):
@@ -75,13 +81,37 @@ class NELifter(Lifter):
                     mod = module_name(self.ne, r.module_idx)
                     # Cross-module call into another lifted module (e.g. CATZDLL):
                     # resolve the ordinal to that module's export entry -> function.
-                    xm = self.xmod.get(mod.upper())
-                    if xm is not None and r.ordinal in xm:
-                        s, o = xm[r.ordinal]
+                    t = self._xres(r)
+                    if t is not None:
+                        s, o = t
                         return f'seg{s:03d}_{o:04X}'
                     imp = get_import(mod, r.ordinal)
                     return imp.name
         return None
+
+    def _xres(self, r) -> Optional[tuple]:
+        """Resolve an import fixup to a (global_seg, offset) in a lifted
+        module, or None if that module is not one of ours.
+
+        Import-by-ordinal (type 1) keys on the ordinal. Import-by-NAME
+        (type 2) has no ordinal at all -- the field the NE calls `ordinal`
+        is a byte offset into this module's imported names table -- so it
+        keys on the name the target module exports. Looking the offset up
+        as an ordinal always missed, which is why every UTOPIA -> UEXTRA
+        call landed on a no-op stub named UEXTRA_Ord173."""
+        xm = self.xmod.get(module_name(self.ne, r.module_idx).upper())
+        if not xm:
+            return None
+        if (r.flags & 3) == 2:
+            return xm.get(import_name(self.ne, r.ordinal).upper())
+        return xm.get(r.ordinal)
+
+    def _reloc_imm(self, r) -> Optional[int]:
+        """The 16-bit offset an OFFSET16 fixup resolves to, or None."""
+        if (r.flags & 3) == 0:
+            return r.target_off & 0xFFFF
+        t = self._xres(r)
+        return None if t is None else t[1] & 0xFFFF
 
     def _get_reloc_at(self, local_off: int) -> Optional[object]:
         """Get relocation annotation at a given local offset."""
@@ -224,9 +254,9 @@ class NELifter(Lifter):
                         return
                     elif tt in (1, 2):
                         mod = module_name(self.ne, r.module_idx)
-                        xm = self.xmod.get(mod.upper())
-                        if xm and r.ordinal in xm:
-                            s, o = xm[r.ordinal]
+                        t = self._xres(r)
+                        if t is not None:
+                            s, o = t
                             self._emit(_write(op1, f'(((uint32_t)SEG_{s}) << 16) | 0x{o & 0xFFFF:04X}'),
                                        f'{orig} -- far ptr {mod}.{r.ordinal}')
                             return
@@ -237,9 +267,9 @@ class NELifter(Lifter):
                         return
                     elif tt in (1, 2):     # cross-module selector (e.g. CATZDLL)
                         mod = module_name(self.ne, r.module_idx)
-                        xm = self.xmod.get(mod.upper())
-                        if xm and r.ordinal in xm:
-                            self._emit(_write(op1, f'SEG_{xm[r.ordinal][0]}'),
+                        t = self._xres(r)
+                        if t is not None:
+                            self._emit(_write(op1, f'SEG_{t[0]}'),
                                        f'{orig} -- selector for {mod}.{r.ordinal}')
                             return
                 elif r.src_type == 5:      # OFFSET16 (offset of a symbol)
@@ -249,9 +279,9 @@ class NELifter(Lifter):
                         return
                     elif tt in (1, 2):
                         mod = module_name(self.ne, r.module_idx)
-                        xm = self.xmod.get(mod.upper())
-                        if xm and r.ordinal in xm:
-                            self._emit(_write(op1, f'0x{xm[r.ordinal][1] & 0xFFFF:04X}'),
+                        t = self._xres(r)
+                        if t is not None:
+                            self._emit(_write(op1, f'0x{t[1] & 0xFFFF:04X}'),
                                        f'{orig} -- offset of {mod}.{r.ordinal}')
                             return
 
@@ -275,9 +305,9 @@ class NELifter(Lifter):
                     return
                 if r.src_type == 2 and tt in (1, 2):            # cross-module selector
                     mod = module_name(self.ne, r.module_idx)
-                    xm = self.xmod.get(mod.upper())
-                    if xm and r.ordinal in xm:
-                        self._emit(f'push16(cpu, SEG_{xm[r.ordinal][0]});',
+                    t = self._xres(r)
+                    if t is not None:
+                        self._emit(f'push16(cpu, SEG_{t[0]});',
                                    f'{orig} -- selector for {mod}.{r.ordinal}')
                         return
                 if r.src_type == 5 and tt == 0:                 # OFFSET16 of a symbol
@@ -290,11 +320,37 @@ class NELifter(Lifter):
                     # the placeholder 0xFFFF is pushed and the thunk dispatches to
                     # seg:FFFF (garbage) -> the Daemon's EB query fails.
                     mod = module_name(self.ne, r.module_idx)
-                    xm = self.xmod.get(mod.upper())
-                    if xm and r.ordinal in xm:
-                        self._emit(f'push16(cpu, 0x{xm[r.ordinal][1] & 0xFFFF:04X});',
+                    t = self._xres(r)
+                    if t is not None:
+                        self._emit(f'push16(cpu, 0x{t[1] & 0xFFFF:04X});',
                                    f'{orig} -- offset of {mod}.{r.ordinal}')
                         return
+
+        # --- Relocated immediate on anything the two branches above miss ---
+        # `sub ax, offset UEXTRA.B$PEND` is the subtraction that sizes the
+        # Access Basic DGROUP template copy, and nothing here handled a fixup
+        # on an arithmetic immediate -- so the placeholder 0xFFFE survived and
+        # the copy ran from a garbage segment. An OFFSET16 target is a plain
+        # number, so rewriting the operand lets the base lifter emit it
+        # unchanged; SELECTOR needs the symbolic SEG_n and stays above.
+        # ADDITIVE means the stored word is an addend, not a chain link.
+        # The fixup can sit on an immediate OR on a memory displacement:
+        # `mov ax, es:[offset UEXTRA.HOLE]` reads the size the Access Basic
+        # runtime needs, and with the placeholder left in place it read
+        # es:[0xFFFF], got 0, and the segment allocated for the runtime came
+        # out 0x265A bytes too small -- so its own template copy overwrote
+        # the stack it was running on.
+        imm = next((o for o in (op2, op1)
+                    if o is not None and o.type in _RELOC_OPERANDS), None)
+        if imm is not None:
+            for off in range(local_off + 1, local_off + inst.length):
+                ann = self._get_reloc_at(off)
+                if ann is None or ann.reloc.src_type != 5:
+                    continue
+                v = self._reloc_imm(ann.reloc)
+                if v is not None:
+                    imm.disp = (v + (imm.disp if ann.reloc.additive else 0)) & 0xFFFF
+                break
 
         # --- Default: delegate to base lifter ---
         super().lift_instruction(inst, func_start)
