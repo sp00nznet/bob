@@ -82,6 +82,19 @@ _SEED = {
 # `cpu->sp += 4 (far retaddr) + purge`, or `retf` boundaries corrupt. Keyed by
 # (MODULE, API). Functions not listed default to 0 with a runtime warning.
 PURGE = {
+    # Reached once UTOPIA -> UEXTRA resolved and the Access Basic runtime
+    # actually ran. A stub with a guessed purge of 0 leaves the caller's
+    # arguments on the stack, so its caller returns through them -- that is
+    # what the `recomp_dispatch MISS seg=<garbage>` lines are.
+    ('KERNEL', 'ADDATOM'): 4, ('KERNEL', 'SETERRORMODE'): 2,
+    ('KERNEL', 'SETHANDLECOUNT'): 2, ('KERNEL', 'MAKEPROCINSTANCE'): 6,
+    ('COMMDLG', 'GETFILETITLE'): 10,
+    ('USER', 'ANSIUPPERBUFF'): 6, ('USER', 'BEGINDEFERWINDOWPOS'): 2,
+    ('USER', 'ENDDEFERWINDOWPOS'): 2, ('USER', 'CALLWINDOWPROC'): 14,
+    ('USER', 'GETACTIVEWINDOW'): 0, ('USER', 'GETTOPWINDOW'): 2,
+    ('USER', 'GETWINDOWTASK'): 2, ('USER', 'POSTMESSAGE'): 10,
+    ('USER', 'SETRECTEMPTY'): 4, ('USER', 'GLOBALADDATOM'): 4,
+
     # ---- KERNEL ----
     ('KERNEL', 'GLOBALALLOC'): 6, ('KERNEL', 'GLOBALREALLOC'): 8,
     ('KERNEL', 'GLOBALFREE'): 2, ('KERNEL', 'GLOBALLOCK'): 2,

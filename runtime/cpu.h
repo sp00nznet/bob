@@ -172,7 +172,30 @@ static inline uint8_t mem_read8(CPU *cpu, uint16_t seg, uint16_t off) {
     return cpu->mem[seg_off(cpu, seg, off)];
 }
 
+/* Guest-memory watchpoint: -DCATZ_WATCH_MEM=<seg> -DCATZ_WATCH_OFF=<off>
+ * reports every write within +/-2 bytes of that address, with the call ring.
+ * Something scribbling on the guest stack shows up as a `recomp_dispatch MISS`
+ * thousands of calls later, so the only way to find the writer is to watch. */
+#if defined(CATZ_WATCH_MEM) && defined(CATZ_WATCH_OFF)
+static inline void catz_mem_watch(CPU *cpu, uint16_t seg, uint16_t off,
+                                  uint32_t val, int width) {
+    if (seg != (uint16_t)(CATZ_WATCH_MEM)) return;
+    if ((int)off < (int)(CATZ_WATCH_OFF) - 2 || off > (uint16_t)(CATZ_WATCH_OFF) + 1) return;
+    fprintf(stderr, "[WATCH_MEM] %u:%04X <- %0*X (w%d sp=%04X ds=%04X es=%04X) ring:",
+            seg, off, width * 2, val, width, cpu->sp, cpu->ds, cpu->es);
+    for (int i = 12; i > 0; i--) {
+        const char *nm = g_fn_ring[(g_fn_ring_pos - (unsigned)i) & (CATZ_FN_RING_SIZE - 1)];
+        if (nm) fprintf(stderr, " %s", nm);
+    }
+    fprintf(stderr, "\n");
+}
+#define CATZ_MEM_WATCH(c, s, o, v, w) catz_mem_watch((c), (s), (o), (v), (w))
+#else
+#define CATZ_MEM_WATCH(c, s, o, v, w) ((void)0)
+#endif
+
 static inline void mem_write8(CPU *cpu, uint16_t seg, uint16_t off, uint8_t val) {
+    CATZ_MEM_WATCH(cpu, seg, off, val, 1);
     cpu->mem[seg_off(cpu, seg, off)] = val;
 }
 
@@ -188,6 +211,7 @@ static inline uint16_t mem_read16(CPU *cpu, uint16_t seg, uint16_t off) {
 }
 
 static inline void mem_write16(CPU *cpu, uint16_t seg, uint16_t off, uint16_t val) {
+    CATZ_MEM_WATCH(cpu, seg, off, val, 2);
     uint32_t addr = seg_off(cpu, seg, off);
 #ifdef CATZ_WATCH_EXC
     {   /* Stack-overflow detector: log the first time sp descends below a low
@@ -218,6 +242,7 @@ static inline uint32_t mem_read32(CPU *cpu, uint16_t seg, uint16_t off) {
 }
 
 static inline void mem_write32(CPU *cpu, uint16_t seg, uint16_t off, uint32_t val) {
+    CATZ_MEM_WATCH(cpu, seg, off, val, 4);
     mem_write16(cpu, seg, off, (uint16_t)(val & 0xFFFF));
     mem_write16(cpu, seg, off + 2, (uint16_t)(val >> 16));
 }

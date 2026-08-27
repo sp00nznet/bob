@@ -14,6 +14,7 @@
  */
 #include "runtime_api.h"
 #include "ne_resources.h"
+#include "ne_exports.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -155,6 +156,43 @@ void KERNEL_LOADLIBRARY(CPU *cpu) {         /* LoadLibrary(lpLibFileName) */
     IMPL_LOG("[win16] LoadLibrary(%s) -> %04X\n", name, h);
     cpu->ax = h;                            /* >32 == success */
     ret(cpu, 4);
+}
+
+int ne_get_proc(uint16_t hinst, const char *name, uint16_t ordinal,
+                uint16_t *seg, uint16_t *off) {
+    for (int i = 0; i < g_ne_nexports; i++) {
+        const NEExport *e = &g_ne_exports[i];
+        if (e->hinst != hinst) continue;
+        if (name ? (e->name[0] && _stricmp(e->name, name) == 0)
+                 : (e->ordinal == ordinal)) {
+            *seg = e->seg; *off = e->off;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* FARPROC GetProcAddress(HINSTANCE, LPCSTR) -> DX:AX far pointer.
+ * A HIWORD of 0 means the low word is an ordinal, not a string pointer.
+ * Returning 0 is how a Win16 app decides its component is missing -- Bob's
+ * VBX loader put up "unable to find a required file" on exactly that. */
+void KERNEL_GETPROCADDRESS(CPU *cpu) {
+    uint16_t hmod = a16(cpu, 4);
+    uint16_t poff = a16(cpu, 0), pseg = a16(cpu, 2);
+    uint16_t seg = 0, off = 0;
+    char nm[128];
+    int ok;
+    if (pseg == 0) {
+        ok = ne_get_proc(hmod, NULL, poff, &seg, &off);
+        IMPL_LOG("[win16] GetProcAddress(%04X, #%u) -> %u:%04X\n", hmod, poff, seg, off);
+    } else {
+        read_asciiz(cpu, pseg, poff, nm, sizeof nm);
+        ok = ne_get_proc(hmod, nm, 0, &seg, &off);
+        IMPL_LOG("[win16] GetProcAddress(%04X, '%s') -> %u:%04X\n", hmod, nm, seg, off);
+    }
+    if (!ok) { seg = 0; off = 0; }
+    cpu->dx = seg; cpu->ax = off;
+    ret(cpu, 6);
 }
 
 void KERNEL_FREELIBRARY(CPU *cpu) { cpu->ax = 1; ret(cpu, 2); }
