@@ -168,7 +168,6 @@ void KERNEL_FINDATOM(CPU *cpu) { (void)cpu; WIN16_LOG("FINDATOM"); cpu->ax = 0; 
 void KERNEL_FREEPROCINSTANCE(CPU *cpu) { (void)cpu; WIN16_LOG("FREEPROCINSTANCE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("FREEPROCINSTANCE"); }
 void KERNEL_FREESELECTOR(CPU *cpu) { (void)cpu; WIN16_LOG("FREESELECTOR"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("FREESELECTOR"); }
 void KERNEL_GETCODEHANDLE(CPU *cpu) { (void)cpu; WIN16_LOG("GETCODEHANDLE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("GETCODEHANDLE"); }
-void KERNEL_GETDOSENVIRONMENT(CPU *cpu) { (void)cpu; WIN16_LOG("GETDOSENVIRONMENT"); cpu->ax = 0; cpu->sp += 4 + 0; }
 void KERNEL_GETDRIVETYPE(CPU *cpu) { (void)cpu; WIN16_LOG("GETDRIVETYPE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("GETDRIVETYPE"); }
 void KERNEL_GETMODULEHANDLE(CPU *cpu) { (void)cpu; WIN16_LOG("GETMODULEHANDLE"); cpu->ax = 0; cpu->sp += 4 + 4; }
 void KERNEL_GETPRIVATEPROFILEINT(CPU *cpu) { (void)cpu; WIN16_LOG("GETPRIVATEPROFILEINT"); cpu->ax = 0; cpu->sp += 4 + 14; }

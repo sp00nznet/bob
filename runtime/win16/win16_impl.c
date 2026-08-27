@@ -381,6 +381,9 @@ void KERNEL_INITTASK(CPU *cpu) {
     mem_write8(cpu, hinst, 0x80, 0);
     mem_write8(cpu, hinst, 0x81, 0x0D);
     cpu->ax = 1;                 /* success (nonzero) */
+    cpu->flags &= ~FLAG_ZF;      /* InitTask returns flags reflecting AX; success => ZF=0 so the
+                                    DLL C0 startup's `jne <full-init>` is taken (MSAJT110 was
+                                    skipping its engine/session-pool init on stale ZF). */
     /* CX = stack LIMIT (lowest offset the stack may reach), not the top. The
      * C0 startup does `add cx,0x100; jb fail` to verify headroom, so a value
      * near 0xFFFF carries and aborts. Put the limit above the statics/heap
@@ -391,6 +394,20 @@ void KERNEL_INITTASK(CPU *cpu) {
     cpu->di = hinst;             /* hInstance */
     cpu->es = hinst; cpu->bx = 0x0080;   /* ES:BX -> command line */
     cpu->bp = 0;
+    ret(cpu, 0);
+}
+
+/* LPSTR GetDOSEnvironment(void) -> DX:AX far ptr to the environment block.
+ * The stub returned AX=0 and left DX garbage, so the C-runtime startup read a
+ * stale segment (e.g. seg10 engine DATA) as the env and parsed garbage "VAR="
+ * strings into the process environment. Return a real EMPTY env (double-NUL). */
+void KERNEL_GETDOSENVIRONMENT(CPU *cpu) {
+    static uint16_t env_sel = 0;
+    if (!env_sel) {
+        env_sel = galloc(cpu, 16);
+        if (env_sel) { mem_write8(cpu, env_sel, 0, 0); mem_write8(cpu, env_sel, 1, 0); }
+    }
+    cpu->dx = env_sel; cpu->ax = 0;   /* env_sel:0000, empty (immediate NUL) */
     ret(cpu, 0);
 }
 
