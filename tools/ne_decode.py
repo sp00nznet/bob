@@ -147,6 +147,115 @@ _BRANCH = frozenset((
 ))
 
 
+_BRANCH = {'jmp', 'jo', 'jno', 'jb', 'jae', 'je', 'jne', 'jbe', 'ja', 'js', 'jns',
+           'jp', 'jnp', 'jl', 'jge', 'jle', 'jg', 'loop', 'loopz', 'loopnz', 'jcxz'}
+_REL = (OpType.REL8, OpType.REL16)
+
+
+def decode_alt_entries(seg, decoder, instructions, functions):
+    """Entry points that are not instruction boundaries in the main decoding.
+
+    `3C 58` is `cmp al, 58h` falling through, but a branch to its second byte
+    executes `58` as `pop ax` -- one of the oldest tricks in x86 code, used to
+    give a shared epilogue two entries a byte apart. MSC emits it constantly:
+    `xor ax,ax; cmp al,58h; jmp epilogue` reached one way returns 0, and
+    entered at +1 pops the value to return instead.
+
+    Only one of the two readings can be an instruction head, so a branch to the
+    other has nowhere to land. It cannot be a label either -- the byte belongs
+    to a different function's C body. Decode it as its own stream, linearly
+    from the target until the flow ends, and lift it as its own function; it
+    realigns with the main decoding within an instruction or two and ends up
+    tail-calling straight back into it.
+
+    Returns {offset: [Instruction]}, and never touches the main decoding.
+    """
+    heads = {i.offset - seg.file_offset for i in instructions}
+    starts = {f.offset for f in functions}
+    spans = []
+    for i in instructions:
+        lo = i.offset - seg.file_offset
+        spans.append((lo, lo + i.length))
+    inside = set()
+    for lo, hi in spans:
+        inside.update(range(lo + 1, hi))          # interior bytes only
+
+    targets = set()
+    for i in instructions:
+        if i.mnemonic in _BRANCH and i.op1 is not None and i.op1.type in _REL:
+            t = i.op1.disp
+            if t not in heads and t not in starts and t in inside:
+                targets.add(t)
+
+    out = {}
+    for t in sorted(targets):
+        stream, off, n = [], t, 0
+        while off < len(seg.data) and n < 64:
+            decoder.pos = off
+            inst = decoder.decode_one()
+            if inst is None:
+                break
+            stream.append(inst)
+            n += 1
+            off += inst.length
+            if inst.mnemonic in ('ret', 'retf', 'iret'):
+                break
+            if inst.mnemonic == 'jmp':
+                break
+        if stream:
+            out[t] = stream
+    return out
+
+
+def promote_shared_continuations(seg, instructions, functions):
+    """Offsets a near jmp/jcc leaves its own function to reach.
+
+    MSC lets several exit paths converge on one epilogue, so a function
+    routinely branches into the middle of the next one. C has no goto across
+    functions, and lift16's fallback for a branch it cannot place computes
+    `recomp_dispatch(abs >> 4, abs & 0xF)` from a FILE-absolute address, which
+    is meaningless as a (selector, offset) in a segmented model -- it misses,
+    returns early, and the caller then reads its locals off a stack the callee
+    never unwound. Making each such target a function start gives the branch a
+    real tail call instead.
+
+    Skipped when the function CONTAINING the target also branches BACKWARD to
+    it: that offset is a loop header, and splitting there turns the loop into
+    unbounded recursion (see docs/BRINGUP.md).
+    """
+    import bisect
+    starts = sorted(f.offset for f in functions)
+    if not starts:
+        return set()
+    fnset = set(starts)
+
+    def owner(o):
+        i = bisect.bisect_right(starts, o) - 1
+        return starts[i] if i >= 0 else None
+
+    by_fn, branches = {}, []
+    for i in instructions:
+        lo = i.offset - seg.file_offset
+        f = owner(lo)
+        if f is None:
+            continue
+        by_fn.setdefault(f, set()).add(lo)
+        if i.mnemonic in _BRANCH and i.op1 is not None and i.op1.type in _REL:
+            branches.append((f, lo, i.op1.disp))
+
+    out = set()
+    for f, lo, t in branches:
+        if t in fnset or t in by_fn.get(f, ()):
+            continue
+        ot = owner(t)
+        if ot is None:
+            continue
+        if any(bf == ot and blo > t and bt == t for bf, blo, bt in branches):
+            continue                      # loop header -- leave it alone
+        out.add(t)
+    return out
+
+
 def detect_functions(seg: Segment, instructions: list, forced_entries=None) -> list:
     """Detect function boundaries.
 
@@ -336,6 +445,14 @@ def disassemble_segment(seg: Segment, ne: NEHeader, show_relocs: bool = True) ->
     if seg_ida and seg_ida.get('functions'):
         forced_entries.update(seg_ida['functions'])  # authoritative IDA entries
     functions = detect_functions(seg, instructions, forced_entries)
+    extra = (promote_shared_continuations(seg, instructions, functions)
+             if not os.environ.get('NE_NO_SPLIT') else set())
+    if extra:
+        forced_entries |= extra
+        functions = detect_functions(seg, instructions, forced_entries)
+    # Entries that are not instruction boundaries get their own stream;
+    # the lifter reads it off the segment (see ne_lift.lift_segment).
+    seg.alt_streams = decode_alt_entries(seg, decoder, instructions, functions)
 
     return instructions, functions, reloc_map
 

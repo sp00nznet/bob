@@ -172,10 +172,7 @@ void KERNEL_GETDRIVETYPE(CPU *cpu) { (void)cpu; WIN16_LOG("GETDRIVETYPE"); cpu->
 void KERNEL_GETMODULEHANDLE(CPU *cpu) { (void)cpu; WIN16_LOG("GETMODULEHANDLE"); cpu->ax = 0; cpu->sp += 4 + 4; }
 void KERNEL_GETPRIVATEPROFILEINT(CPU *cpu) { (void)cpu; WIN16_LOG("GETPRIVATEPROFILEINT"); cpu->ax = 0; cpu->sp += 4 + 14; }
 void KERNEL_GETPRIVATEPROFILESTRING(CPU *cpu) { (void)cpu; WIN16_LOG("GETPRIVATEPROFILESTRING"); cpu->ax = 0; cpu->sp += 4 + 22; }
-void KERNEL_GETPROFILEINT(CPU *cpu) { (void)cpu; WIN16_LOG("GETPROFILEINT"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("GETPROFILEINT"); }
-void KERNEL_GETPROFILESTRING(CPU *cpu) { (void)cpu; WIN16_LOG("GETPROFILESTRING"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("GETPROFILESTRING"); }
 void KERNEL_GETTEMPDRIVE(CPU *cpu) { (void)cpu; WIN16_LOG("GETTEMPDRIVE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("GETTEMPDRIVE"); }
-void KERNEL_GETTEMPFILENAME(CPU *cpu) { (void)cpu; WIN16_LOG("GETTEMPFILENAME"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("GETTEMPFILENAME"); }
 void KERNEL_GLOBALDOSALLOC(CPU *cpu) { (void)cpu; WIN16_LOG("GLOBALDOSALLOC"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("GLOBALDOSALLOC"); }
 void KERNEL_GLOBALDOSFREE(CPU *cpu) { (void)cpu; WIN16_LOG("GLOBALDOSFREE"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("GLOBALDOSFREE"); }
 void KERNEL_GLOBALFIX(CPU *cpu) { (void)cpu; WIN16_LOG("GLOBALFIX"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("GLOBALFIX"); }
@@ -207,10 +204,8 @@ void KERNEL___AHSHIFT(CPU *cpu) { (void)cpu; WIN16_LOG("__AHSHIFT"); cpu->ax = 0
 void KERNEL___WINFLAGS(CPU *cpu) { (void)cpu; WIN16_LOG("__WINFLAGS"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("__WINFLAGS"); }
 
 /* ===== KEYBOARD ===== */
-void KEYBOARD_ANSITOOEM(CPU *cpu) { (void)cpu; WIN16_LOG("ANSITOOEM"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("ANSITOOEM"); }
-void KEYBOARD_ANSITOOEMBUFF(CPU *cpu) { (void)cpu; WIN16_LOG("ANSITOOEMBUFF"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("ANSITOOEMBUFF"); }
-void KEYBOARD_OEMTOANSI(CPU *cpu) { (void)cpu; WIN16_LOG("OEMTOANSI"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("OEMTOANSI"); }
-void KEYBOARD_OEMTOANSIBUFF(CPU *cpu) { (void)cpu; WIN16_LOG("OEMTOANSIBUFF"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("OEMTOANSIBUFF"); }
+void KEYBOARD_ANSITOOEMBUFF(CPU *cpu) { (void)cpu; WIN16_LOG("ANSITOOEMBUFF"); cpu->ax = 0; cpu->sp += 4 + 10; }
+void KEYBOARD_OEMTOANSIBUFF(CPU *cpu) { (void)cpu; WIN16_LOG("OEMTOANSIBUFF"); cpu->ax = 0; cpu->sp += 4 + 10; }
 void KEYBOARD_VKKEYSCAN(CPU *cpu) { (void)cpu; WIN16_LOG("VKKEYSCAN"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("VKKEYSCAN"); }
 
 /* ===== MMSYSTEM ===== */
@@ -255,10 +250,10 @@ void SHELL_SHELLEXECUTE(CPU *cpu) { (void)cpu; WIN16_LOG("SHELLEXECUTE"); cpu->a
 
 /* ===== USER ===== */
 void USER_ADJUSTWINDOWRECT(CPU *cpu) { (void)cpu; WIN16_LOG("ADJUSTWINDOWRECT"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("ADJUSTWINDOWRECT"); }
-void USER_ANSILOWER(CPU *cpu) { (void)cpu; WIN16_LOG("ANSILOWER"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("ANSILOWER"); }
-void USER_ANSILOWERBUFF(CPU *cpu) { (void)cpu; WIN16_LOG("ANSILOWERBUFF"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("ANSILOWERBUFF"); }
-void USER_ANSINEXT(CPU *cpu) { (void)cpu; WIN16_LOG("ANSINEXT"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("ANSINEXT"); }
-void USER_ANSIUPPER(CPU *cpu) { (void)cpu; WIN16_LOG("ANSIUPPER"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("ANSIUPPER"); }
+void USER_ANSILOWER(CPU *cpu) { (void)cpu; WIN16_LOG("ANSILOWER"); cpu->ax = 0; cpu->sp += 4 + 4; }
+void USER_ANSILOWERBUFF(CPU *cpu) { (void)cpu; WIN16_LOG("ANSILOWERBUFF"); cpu->ax = 0; cpu->sp += 4 + 6; }
+void USER_ANSINEXT(CPU *cpu) { (void)cpu; WIN16_LOG("ANSINEXT"); cpu->ax = 0; cpu->sp += 4 + 4; }
+void USER_ANSIUPPER(CPU *cpu) { (void)cpu; WIN16_LOG("ANSIUPPER"); cpu->ax = 0; cpu->sp += 4 + 4; }
 void USER_ANSIUPPERBUFF(CPU *cpu) { (void)cpu; WIN16_LOG("ANSIUPPERBUFF"); cpu->ax = 0; cpu->sp += 4 + 6; }
 void USER_BEGINDEFERWINDOWPOS(CPU *cpu) { (void)cpu; WIN16_LOG("BEGINDEFERWINDOWPOS"); cpu->ax = 0; cpu->sp += 4 + 2; }
 void USER_BEGINPAINT(CPU *cpu) { (void)cpu; WIN16_LOG("BEGINPAINT"); cpu->ax = 0; cpu->sp += 4 + 6; }
@@ -376,8 +371,6 @@ void USER_LOADACCELERATORS(CPU *cpu) { (void)cpu; WIN16_LOG("LOADACCELERATORS");
 void USER_LOADBITMAP(CPU *cpu) { (void)cpu; WIN16_LOG("LOADBITMAP"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("LOADBITMAP"); }
 void USER_LOADCURSOR(CPU *cpu) { (void)cpu; WIN16_LOG("LOADCURSOR"); cpu->ax = 0; cpu->sp += 4 + 6; }
 void USER_LOADMENU(CPU *cpu) { (void)cpu; WIN16_LOG("LOADMENU"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("LOADMENU"); }
-void USER_LSTRCMP(CPU *cpu) { (void)cpu; WIN16_LOG("LSTRCMP"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("LSTRCMP"); }
-void USER_LSTRCMPI(CPU *cpu) { (void)cpu; WIN16_LOG("LSTRCMPI"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("LSTRCMPI"); }
 void USER_MAPWINDOWPOINTS(CPU *cpu) { (void)cpu; WIN16_LOG("MAPWINDOWPOINTS"); cpu->ax = 0; cpu->sp += 4; WIN16_UNKNOWN("MAPWINDOWPOINTS"); }
 void USER_MODIFYMENU(CPU *cpu) { (void)cpu; WIN16_LOG("MODIFYMENU"); cpu->ax = 0; cpu->sp += 4 + 12; }
 void USER_MOVEWINDOW(CPU *cpu) { (void)cpu; WIN16_LOG("MOVEWINDOW"); cpu->ax = 0; cpu->sp += 4 + 12; }

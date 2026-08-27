@@ -10,7 +10,11 @@ MODE="${1:-normal}"
 if [ "$MODE" = "trace" ]; then OBJ=build/objt; EXE=build/bob_t.exe; DEF="-DCATZ_TRACE_FN";
 else OBJ=build/obj; EXE=build/bob.exe; DEF=""; fi
 mkdir -p "$OBJ"
-CFLAGS="-O1 -w -Iruntime -Iruntime/win16 -Isrc $DEF"
+# -foptimize-sibling-calls is load-bearing, not an optimisation. A guest loop
+# whose body IDA split across two functions lifts to two C functions that
+# tail-call each other; without the flag that is unbounded recursion and the
+# host blows its stack. With it each `f(cpu); return;` compiles to a jump.
+CFLAGS="-O1 -foptimize-sibling-calls -w -Iruntime -Iruntime/win16 -Isrc $DEF"
 echo "[build] mode=$MODE -> $EXE"
 # Compile every src/*.c and runtime/*.c (+ win16) in parallel, only if newer.
 compile() { local c="$1" o="$2"; if [ ! -f "$o" ] || [ "$c" -nt "$o" ]; then gcc $CFLAGS -c "$c" -o "$o"; fi; }

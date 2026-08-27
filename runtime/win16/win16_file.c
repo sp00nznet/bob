@@ -275,6 +275,40 @@ void KERNEL_DOS3CALL(CPU *cpu) {
     case 0x47:                              /* get current dir -> empty (root) */
         if (cpu->ds) mem_write8(cpu, cpu->ds, cpu->si, 0);
         break;
+    case 0x43:                              /* get/set file attributes */
+        /* AL=0 get -> CX=attrs; AL=1 set -> succeed. Jet stats its database and
+         * lock file through this before deciding whether to create them. */
+        if ((cpu->ax & 0xFF) == 0) cpu->cx = 0x20;   /* FILE_ATTRIBUTE_ARCHIVE */
+        cpu->ax = cpu->cx;
+        cpu->flags &= ~FLAG_CF;
+        break;
+    case 0x5C:                              /* lock / unlock file region */
+        /* Jet takes byte-range locks on the .ldb to coordinate with other
+         * Access instances. Nothing else has these files open, so every lock
+         * succeeds. */
+        cpu->flags &= ~FLAG_CF;
+        break;
+    case 0x5E:                              /* network: get machine name */
+        /* CH=0 means "no name defined", which is the right answer for a
+         * non-networked machine and stops Jet looking for a share. */
+        cpu->cx &= 0x00FF;
+        cpu->flags &= ~FLAG_CF;
+        break;
+    case 0x44:                              /* IOCTL. AL=0: get device info */
+        /* Jet asks this about every handle it opens. The default branch
+         * answered "invalid function" with CF set, which Jet reads as a failed
+         * open and unwinds through longjmp. Bit 7 clear says "this is a file,
+         * not a character device", which is true of everything we hand back. */
+        cpu->dx = 0x0002;                    /* file, on drive C: */
+        cpu->ax = cpu->dx;
+        cpu->flags &= ~FLAG_CF;
+        break;
+    case 0x59:                              /* get extended error */
+        /* Called after any failure; answering "invalid function" here means the
+         * caller cannot even find out what went wrong. Report no error. */
+        cpu->ax = 0; cpu->bx = 0; cpu->cx = 0;
+        cpu->flags &= ~FLAG_CF;
+        break;
     case 0x4C:                              /* terminate - ignore (host loop drives exit) */
         break;
     default:
