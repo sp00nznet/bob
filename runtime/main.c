@@ -105,9 +105,12 @@ void catz_dump_args(const char *nm)
         uint16_t off = mem_read16(g_cpu, g_cpu->ss, (uint16_t)(g_cpu->sp + 4 + i * 2));
         uint16_t seg = mem_read16(g_cpu, g_cpu->ss, (uint16_t)(g_cpu->sp + 6 + i * 2));
         fprintf(stderr, "   +%02X = %04X", 4 + i * 2, off);
-        /* A plausible far pointer is one whose high word is a selector we
-         * actually placed; anything else is just a word. */
-        if (seg && seg < 228 && SEG_SEGMENT_BASE[seg]) {
+        /* A far pointer occupies an even pair, low word first, so only try to
+         * read one starting at an even slot -- decoding every overlapping pair
+         * invents pointers out of adjacent unrelated words. Even then it is a
+         * guess: the argument list is a mix of words and dwords, and only the
+         * callee knows which. Treat a decoded string as a hint. */
+        if ((i & 1) == 0 && seg && seg < 228 && SEG_SEGMENT_BASE[seg]) {
             char b[48];
             int k = 0;
             for (; k < (int)sizeof b - 1; k++) {
