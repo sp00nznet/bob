@@ -547,3 +547,68 @@ calls. **But it still returns FALSE**: the OLE methods now RUN and return an
 0x8004xxxx error because Bob's OLE Automation runtime (IDispatch/type-library/
 BSTR/Jet data layer) isn't implemented -- the methods execute but fail. That OLE
 Automation subsystem is the real remaining work, not more lifting/promotion.
+
+## The frontier is the Jet workspace login, not OLE plumbing
+
+Three rounds of the surgical promotion above emptied the host-phase
+`dispatch_far` miss list (seg7:0379 -> seg2:1F76 + seg7:06B9 -> seg8:1E1E),
+so every engine OLE Automation call InitInstance makes now lands in lifted
+code. InitInstance still returns FALSE, and with the misses gone the reason
+is finally legible.
+
+Adding the guest `sp` to the `-DCATZ_TRACE_FN` line is what made it legible.
+`TRACE_FN` fires on entry only, so a chain of returns leaves no trace at all
+and a flat list of 6,000 names hides all structure. Every lifted call pushes
+a return frame, so sp is a stand-in for depth: find a function's entry sp,
+then scan forward for the first line at or above it -- that is where it
+returned, and the line before it is the last thing it did.
+
+Read that way the failure is a single branch:
+
+```
+seg002_7C80:  call seg011_15D7(pObj)      ; engine: open the data session
+              or dx, dx
+              jge  7C28                   ; success
+              jmp  9FF9                   ; Release(pObj) and return the HRESULT
+```
+
+and inside the engine:
+
+```
+seg011_17BE:  call seg011_0FEC(seg1:5C8C = "", seg1:5F74 = "Admin", ...)
+              or ax, ax
+              jne 181F                    ; success
+              call seg010_52E6            ; DX:AX = last Jet error @ seg24:AEEF
+              cmp dx, 0xFFFF              ; 0xFFFF means "no error"
+              jne 17FC                    ; -> mov cx, 0x33 -> HRESULT 0x80040033
+```
+
+`seg011_17FC` is the error factory: `cx` is the code, `dx` becomes
+`0x8004 | (sign & 0xB)`, so `cx = 0x33` is literally where 0x80040033 comes
+from. Bob is doing the DAO/Jet default login -- workspace `""`, user
+`"Admin"`, no password -- and Jet is refusing it. Nothing above this line is
+an OLE problem; **the remaining work is the Jet/DAO layer**, which is what
+MSAJT110/MSABC110/MSAES110 were lifted for.
+
+MSAJT110's LibMain is only 5 lifted calls (`seg045_0000` C0 startup ->
+`seg052_0000`, which is `mov ax,1; retf`). That is not a bug -- Jet defers
+its real initialization to the first DBEngine use -- so the state Jet is
+missing is built on the path through `seg011_0FEC`, not at load time.
+
+### "no main procedure" is a red herring
+
+R6021 comes from the MSC startup at `seg035_10DF` (`mov ax, 0x15`), which is
+reached only by falling off the end of:
+
+```
+call seg035_0706        ; WinMain
+add sp, 0xA
+push ax
+call seg035_019B        ; exit(status)  -- must not return
+jmp  seg035_10DF        ; _amsg_exit(R6021)
+```
+
+`exit()` bottoms out in `INT 21h/AH=4Ch`, and our DOS3CALL shim returns
+instead of terminating, so the CRT falls into the next instruction. The
+message says nothing about the app: WinMain ran, AfxWinMain returned, and
+`exit()` simply failed to be fatal. Read the InitInstance result, not this.

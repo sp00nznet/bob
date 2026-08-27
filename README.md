@@ -77,7 +77,7 @@ your own OEM/retail disc, then extract:
 7z x game/iso/U1.CAB -ogame/install   # UTOPIA.DLL, UTOPIAWA.EXE, ACTORS\*.ACT, ...
 ```
 
-## Status: Bringup — OLE init + main window created; MFC InitInstance runs ✅
+## Status: Bringup — InitInstance runs end-to-end; frontier is the Jet/DAO login
 
 All three modules lift to link-clean C. The recompiled **engine LibMain
 initializes cleanly** (`ax=0001`), the **host runs its full MFC AfxWinMain**,
@@ -88,9 +88,10 @@ functions** and the host for **3677 functions** — i.e. the lift is faithful
 (every divergence chased down was a harness gap, not a recomp bug).
 
 ```
-UTOPIA LibMain returned (ax=0001) after 784 lifted calls    ✅ engine init OK
-host -> AfxWinMain (seg032_1C2A) -> InitApplication -> InitInstance (seg036_2E61)
-InitInstance: SetHandleCount, CoBuildVersion(OLE), wsprintf, WritePrivateProfile...
+UTOPIA LibMain returned (ax=0001) after 811 lifted calls    ✅ engine init OK
+host -> AfxWinMain -> InitApplication -> InitInstance (seg036_2E61)  6049 calls
+InitInstance: OLE init, RegisterClass, CreateWindowEx('Daemon'), engine OLE
+              Automation -> DAO login (workspace "", user "Admin") -> 0x80040033
 ```
 
 The fixes that got here (see **[docs/BRINGUP.md](docs/BRINGUP.md)**):
@@ -117,14 +118,20 @@ MFC's subclass-on-`WM_NCCREATE` through the captured `WH_CALLWNDPROC` hook, so t
 main window ("AfxFrameOrView" / "Daemon") is created and attached
 (`m_hWnd` set, added to MFC's HWND map).
 
-**Current frontier — engine OLE Automation vtables.** InitInstance now runs deep
-into Bob's OLE Automation init (`AfxOleInit`), which dispatches through OLE object
-vtables that live in the engine's *code* segments. Those engine vtables aren't
-promoted yet (the stride-4 promotion is gated to the host because the engine has
-jump-table false positives that, once promoted, recurse and crash init — a
-`ret`/`retf`-preceded guard now removes the loop-header class; other classes
-remain). Resolving engine vtable promotion is the next step to a running message
-loop. See docs/BRINGUP.md.
+**Current frontier — the Jet/DAO workspace login.** Every engine OLE
+Automation vtable InitInstance dispatches through is now promoted and lands in
+lifted code (the host-phase `dispatch_far` miss list is empty). InitInstance
+still returns FALSE, and the reason is now a single legible branch: the engine
+performs Bob's DAO default login — workspace `""`, user `"Admin"`, no password
+— and Jet refuses it, so `seg011_17FC` manufactures `0x80040033` and Bob's OLE
+init releases its (never-created) object and gives up. The remaining work is the
+**Jet/DAO data layer**, which is exactly what MSAJT110/MSABC110/MSAES110 were
+lifted for — not more OLE plumbing. See docs/BRINGUP.md for the trace.
+
+(The `FatalAppExit "no main procedure"` line at the end of a run is noise:
+WinMain runs and returns, and the CRT's `exit()` bottoms out in an `INT 21h/4Ch`
+shim that returns instead of terminating, so the startup falls into its R6021
+message. Read the InitInstance result, not that line.)
 
 ### How it lifts (the three modules → one program)
 
@@ -217,7 +224,7 @@ cmake -B build -G Ninja && cmake --build build
 
 1. ✅ Recon — module map, imports, clusters, actor format
 2. ✅ IDA code map + lift — **all three modules lift to link-clean C**
-3. 🟦 Bringup — **UTOPIA engine init runs to completion (24,680 calls)**; host startup next
+3. 🟦 Bringup — engine init + host InitInstance run; **blocked on the Jet/DAO login**
 4. ⬜ First frame — render the Bob house room (WinG/DIB)
 5. ⬜ One actor on screen — load ROVER.ACT, draw a cel, play a voice clip
 6. ⬜ **LLM speech** — LLM + TTS drive the actor's existing animation/voice channel

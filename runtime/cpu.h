@@ -46,8 +46,12 @@ void catz_ds_check(const char *nm);
 #define TRACE_FN(n) do { g_fn_ring[(g_fn_ring_pos++) & (CATZ_FN_RING_SIZE-1)] = (n); \
     catz_ds_check(n); } while (0)
 #elif defined(CATZ_TRACE_FN)
+/* Guest sp stands in for call depth: every lifted call pushes a return
+ * frame, so a smaller sp is deeper. Without it the trace is a flat list
+ * of 6000 names with no way to see which call a result came back from. */
+struct CPU; extern struct CPU *g_cpu;
 #define TRACE_FN(n) do { g_fn_ring[(g_fn_ring_pos++) & (CATZ_FN_RING_SIZE-1)] = (n); \
-    fprintf(stderr, "FN %s\n", (n)); } while (0)
+    fprintf(stderr, "FN %04X %s\n", g_cpu ? g_cpu->sp : 0, (n)); } while (0)
 #else
 #define TRACE_FN(n) (g_fn_ring[(g_fn_ring_pos++) & (CATZ_FN_RING_SIZE-1)] = (n))
 #endif
