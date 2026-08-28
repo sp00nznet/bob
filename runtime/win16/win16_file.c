@@ -217,6 +217,35 @@ void KERNEL__LLSEEK(CPU *cpu) {           /* _llseek(hFile, LONG lOffset, iOrigi
     fret(cpu, 8);
 }
 
+/* The OFSTRUCT's szPathName is a DOS path in a 128-byte struct, and callers
+ * parse it and hand it back. Writing the HOST path there ("game/install/...")
+ * is both longer than the field and meaningless to the guest, and Jet's own
+ * bounds check (seg058_005F) raises -1023 on an over-long one. bob_resolve
+ * takes the basename anyway, so a plain drive-qualified name round-trips. */
+static void of_dos_path(const char *guest, char *out, int outsz)
+{
+    const char *base = guest, *p;
+    for (p = guest; *p; p++)
+        if (*p == '/' || *p == '\\') base = p + 1;
+    snprintf(out, outsz, "C:\\%s", base);
+}
+
+static void of_fill(CPU *cpu, uint16_t ofseg, uint16_t ofoff,
+                    const char *guest, int err)
+{
+    char dos[128];
+    int i;
+    if (!ofseg) return;
+    of_dos_path(guest, dos, sizeof dos);
+    /* OFSTRUCT: +0 cBytes, +1 fFixedDisk, +2 nErrCode, +4 reserved[4], +8 sz */
+    mem_write8(cpu, ofseg, ofoff, (uint8_t)(8 + strlen(dos) + 1));
+    mem_write8(cpu, ofseg, (uint16_t)(ofoff + 1), 1);           /* fFixedDisk */
+    mem_write16(cpu, ofseg, (uint16_t)(ofoff + 2), (uint16_t)err);
+    for (i = 0; dos[i]; i++)
+        mem_write8(cpu, ofseg, (uint16_t)(ofoff + 8 + i), (uint8_t)dos[i]);
+    mem_write8(cpu, ofseg, (uint16_t)(ofoff + 8 + i), 0);
+}
+
 void KERNEL_OPENFILE(CPU *cpu) {          /* OpenFile(lpFileName, lpOFSTRUCT, wStyle) */
     char path[260]; fread_asciiz(cpu, fa16(cpu, 8), fa16(cpu, 6), path, sizeof path);
     uint16_t ofoff = fa16(cpu, 2), ofseg = fa16(cpu, 4);
@@ -230,13 +259,17 @@ void KERNEL_OPENFILE(CPU *cpu) {          /* OpenFile(lpFileName, lpOFSTRUCT, wS
         fret(cpu, 10); return;
     }
     FIO_LOG("[file] OpenFile '%s' style=%04X\n", path, style);
+    if (style & 0x0100) {                  /* OF_PARSE: fill the OFSTRUCT only */
+        /* No file is opened and 0 -- not a handle -- is the success answer.
+         * Opening anyway meant a missing file came back -1, which Jet reads as
+         * "invalid path" and raises -1023 over. */
+        of_fill(cpu, ofseg, ofoff, path, 0);
+        cpu->ax = 0;
+        fret(cpu, 10); return;
+    }
     int mode = (style & 3);                 /* OF_READ/WRITE/READWRITE low bits */
     int h = fio_open_mode2(path, mode, (style & 0x1000) != 0 /*OF_CREATE*/);
-    if (ofseg) {                            /* fill szPathName so callers can re-read it */
-        for (int i = 0; i < (int)sizeof(host) && host[i]; i++)
-            mem_write8(cpu, ofseg, (uint16_t)(ofoff + 8 + i), (uint8_t)host[i]);
-        mem_write16(cpu, ofseg, (uint16_t)(ofoff + 2), (uint16_t)(h < 0 ? 2 : 0));
-    }
+    of_fill(cpu, ofseg, ofoff, path, h < 0 ? 2 : 0);
     cpu->ax = (uint16_t)(h < 0 ? 0xFFFF : h);
     fret(cpu, 10);
 }
