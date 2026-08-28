@@ -52,14 +52,20 @@ int jet_longjmp(CPU *cpu, uint16_t env, uint16_t val)
     uint16_t sp = mem_read16(cpu, ss, (uint16_t)(env + 6));
     int i;
 
-    /* The call site pushed a far return frame (4 bytes) before entering
-     * setjmp, so the anchor's sp sits 4 above the sp the jmp_buf recorded. */
+    /* The call site pushed a return frame before entering setjmp -- 4 bytes for
+     * a far call, 2 for a near one (the 30 sites inside setjmp's own segment) --
+     * so the anchor's sp sits that far above the sp the jmp_buf recorded. */
     for (i = g_top - 1; i >= 0; i--)
         if (g_anchors[i].live && g_anchors[i].ss == ss
-            && (uint16_t)(g_anchors[i].sp - 4) == sp)
+            && ((uint16_t)(g_anchors[i].sp - 4) == sp
+                || (uint16_t)(g_anchors[i].sp - 2) == sp))
             break;
     if (i < 0) {
-        JMP_LOG("[jet] longjmp to %04X:%04X with no anchor\n", ss, env);
+        JMP_LOG("[jet] longjmp to %04X:%04X no anchor (want ss=%04X sp=%04X;"
+                " %d live, cur sp=%04X:", ss, env, ss, sp, g_top, cpu->sp);
+        { int k; for (k = g_top - 1; k >= 0 && k > g_top - 12; k--)
+              JMP_LOG(" %04X:%04X", g_anchors[k].ss, g_anchors[k].sp); }
+        JMP_LOG(")\n");
         return 0;                       /* caller falls back to a plain return */
     }
 
