@@ -1163,37 +1163,43 @@ was my own error. That build had `-DELFISH_TRACE_RUNTIME` but not
 compiled out rather than absent. **Run both defines together when correlating
 DOS traffic with anything else.**
 
-## Frontier: a null RMS slot pointer
+## Frontier: an RMS object field that is never initialised
 
-`ds:[785Ah]` is selector **0x4014**, Jet's RMS segment. `seg061_2364` reads the
-handle for a transfer out of `es:[si]` there, with `si = bx` -- and `bx` is a
-**slot pointer**, not an index. Slots sit at 0x16, 0x228, 0x43A ... 0x212 apart.
-
-Dumping `bx` at every `seg061_2364` entry (`-DCATZ_ARGS_OF='"seg061_2364"'`)
-against the DOS log settles it. The calls before the failure use 0x16 and
-0x228 and work; the one immediately before it is
+The -1022 chain is now traced end to end. Reading it from the failure
+backwards:
 
 ```
-[ARGS] seg061_2364 #7  ax=0000 bx=0000 cx=0043 si=00EE ...
-[dos]  AH=42 FAILED ax=0006 bx=043A from ... seg061_2364 seg061_01A8 seg061_0119
+seg061_004C     INT 21h AH=42 -> DOS error 6 (invalid handle)
+seg061_0119     bx = [bp+0Ch]                 the handle, = 043Ah
+seg061_01A8     forwards its own arguments
+seg061_2364     si = bx; es = ds:[785Ah]; push es:[si]
+                bx = 0 here, so this reads 4014:[0000] -- the array base,
+                whose first word is the free-list head, 043Ah
+seg061_1E1D     bx = ss:[bp+0Eh]              = 0
+seg061_1664     the big Jet transfer function; [bp+0Eh] is its first argument
+seg077_0072     push es:[si+2]                <- becomes that argument, and is 0
+seg077_0054     si = bx, bx = 427Eh on entry
 ```
 
-**bx = 0.** That is not a slot -- it is the base of the array, and
-`4014:[0000]` holds **0x043A**, which is the free-list head (the third slot's
-own address). Jet read the list head as a file handle and seeked on it.
+So the argument is `4014:[427Eh + 2]` and it holds **0**. Everything below that
+is correct behaviour on a null input: `seg061_2364` dutifully reads the array
+base, gets the free-list head, and seeks on it.
 
-Watching `4014:[0x16]` with both trace defines on shows the machinery works
-when it is given a real slot: `<- 00` from the clearing `rep stosb`, then
-`<- 0005`, the handle of the file just opened. Nothing is wrong with opening or
-with the slot layout.
+Two things rule out the obvious suspects:
 
-So the defect is upstream: something hands this path a null slot pointer.
-`bx` comes from the argument at `[bp+0Eh]`, and it is 0 all the way up through
-`seg061_1CDD` (`lea si,[bx+0EEh]` giving the si=0x00EE in the dump above),
-`seg061_1DAB` (`test byte es:[bx+106h],1` on the array header),
-`seg061_1DE0/1DE5` and `seg061_1E1D`. The whole function was *called* with it.
+- **The slot machinery works.** Watching `4014:[0x16]` with both trace defines
+  on shows `<- 00` from the clearing `rep stosb` and then `<- 0005`, the handle
+  of the file just opened. Slots at 0x16 and 0x228 are used successfully by
+  earlier calls.
+- **The other call path is fine.** `seg057_00EA` reaches the same
+  `seg061_1664` and passes `si` after `mov si, bx`, which is a real slot
+  pointer. Only the `seg077` path passes zero.
 
-Next step: keep walking up from `seg061_1CBB` / `seg061_1CDD` to the function's
-real entry, then find its caller and what it thinks it is passing. Either a
-"find the slot for this file" call returned 0 and the result went unchecked, or
-the slot pointer is being lost between there and here.
+Next step: watch `4014:[0x4280]` (`-DCATZ_WATCH_MEM=0x4014 -DCATZ_WATCH_OFF=0x4280`)
+and find whether anything ever writes it. If nothing does, walk up from
+`seg077_0054` -- its `bx` (0x427E) is the object whose +2 field should have
+been filled when the file was attached to it.
+
+Note `seg077_0054` runs **once** in a whole run, so the ARGS dump is
+unambiguous; and it is a different object class from the 0x212-byte slots at
+0x16/0x228/0x43A, so do not assume the same layout.
