@@ -39589,7 +39589,7 @@ void seg071_4BB3(CPU *cpu);
 void seg071_4BB6(CPU *cpu);
 void seg071_4BC0(CPU *cpu);
 
-/* seg72 (574 functions) */
+/* seg72 (575 functions) */
 void seg072_421A(CPU *cpu);
 void seg072_4224(CPU *cpu);
 void seg072_0000(CPU *cpu);
@@ -39730,6 +39730,7 @@ void seg072_1011(CPU *cpu);
 void seg072_1044(CPU *cpu);
 void seg072_1058(CPU *cpu);
 void seg072_106B(CPU *cpu);
+void seg072_1074(CPU *cpu);
 void seg072_10D9(CPU *cpu);
 void seg072_10E6(CPU *cpu);
 void seg072_110A(CPU *cpu);

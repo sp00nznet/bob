@@ -102,16 +102,30 @@ void KERNEL_GLOBALREALLOC(CPU *cpu) {
     uint32_t old = (hMem ? g_sel_size[hMem] : 0);
     if (bytes <= old) {                     /* fits: keep handle */
         cpu->ax = hMem;
-    } else {                                /* grow: new block, copy, free old */
+    } else {                                /* grow: new block, copy, repoint */
+        /* Win16 guarantees the HANDLE survives a GlobalReAlloc even when the
+         * block moves -- only the address changes. Handing back a different
+         * selector and freeing the old one broke that: Jet reallocates a buffer
+         * and then asks GlobalSize about the selector it still holds, gets 0
+         * for a freed one, and raises -1011 ("out of memory") on it.
+         * Selectors here are just an index into sel_base, so the block can move
+         * under the same handle -- which is exactly the Win16 contract. */
         uint16_t nsel = galloc(cpu, bytes);
         if (nsel && hMem) {
-            for (uint32_t i = 0; i < old; i++)
+            uint32_t i;
+            for (i = 0; i < old; i++)
                 mem_write8(cpu, nsel, (uint16_t)i, mem_read8(cpu, hMem, (uint16_t)i));
-            gfree(cpu, hMem);
+            gfree(cpu, hMem);               /* returns the old block to the pool */
+            cpu->sel_base[hMem] = cpu->sel_base[nsel];
+            g_sel_base[hMem] = g_sel_base[nsel];
+            g_sel_size[hMem] = g_sel_size[nsel];
+            cpu->ax = hMem;                 /* same handle, new home */
+        } else {
+            cpu->ax = nsel;
         }
-        cpu->ax = nsel;
     }
     if (cpu->ax) cpu->flags &= ~FLAG_CF; else cpu->flags |= FLAG_CF;
+    IMPL_LOG("[win16] GlobalReAlloc(h=%04X, %u) -> %04X\n", hMem, (unsigned)bytes, cpu->ax);
     ret(cpu, 8);
 }
 

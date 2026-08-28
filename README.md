@@ -118,23 +118,17 @@ MFC's subclass-on-`WM_NCCREATE` through the captured `WH_CALLWNDPROC` hook, so t
 main window ("AfxFrameOrView" / "Daemon") is created and attached
 (`m_hWnd` set, added to MFC's HWND map).
 
-**Current frontier - an ISAM slot still pointing at the "unsupported" stub.**
-Three fixes this round took Jet a long way. A **lifter** bug first:
-`IMUL r16, r/m16, imm` (69h/6Bh) is the 80186 *three-operand* form and the
-decoder was discarding the source, so `imul bx, [bp-2], 19Eh` lifted as
-`bx = bx * 19Eh` -- **762 instructions across Bob**, one of them the index into
-Jet's ISAM slot table. Then `JET_SETJMP` was only wrapping FAR call sites, so
-the 30 near calls to setjmp planted no anchor and a longjmp to Jet's outermost
-handler unwound nothing. Then `OpenFile`'s `OF_PARSE` (fill the path, open
-nothing) was unimplemented.
+**Current frontier - Jet error -1022.** The DAO login's error code has walked
+**-1003 -> -1310 -> -1011 -> -1022** across this round, each step a different
+real defect: a three-operand `IMUL` the decoder was mis-lifting (762
+instructions), `JET_SETJMP` missing from near call sites, `OpenFile`'s
+`OF_PARSE`, a Jet dispatch-table entry point IDA never marked, and
+`GlobalReAlloc` not preserving its handle. Along the way **Jet started opening
+Bob's shipped SYSTEM.MDB and taking its `.ldb` lock**.
 
-With those, **Jet opens Bob's shipped SYSTEM.MDB and takes its `.ldb` lock**,
-raises no errors, leaves no longjmp unmatched and no stack purge guessed, and
-InitInstance runs 13,102 -> 18,258 lifted calls. It still returns FALSE, now
-with -1310 -- which is not raised but simply *returned* by `seg055`, Jet's
-table of "operation not supported" placeholders. Something that should have
-registered a native ISAM entry point has not. See
-[docs/BRINGUP.md](docs/BRINGUP.md).
+InitInstance runs 13,102 -> 18,386 lifted calls with zero unmatched longjmps,
+zero guessed stack purges and three dispatch misses left (all in engine
+LibMain). See [docs/BRINGUP.md](docs/BRINGUP.md).
 
 ### How it lifts (the three modules → one program)
 

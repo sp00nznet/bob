@@ -74,6 +74,12 @@ FORCE_PROMOTE = {
     8:  [0x1E1E],
     11: [0x13EF],
     13: [0x681A],
+    # MSAJT110. Jet dispatches ISAM entry points through a table it builds at
+    # RUNTIME, so no relocation points at them and IDA never made functions.
+    # seg072:1074 is `enter 54h,0` right after a `ret 0Eh` and a nop pad -- a
+    # clean prologue; unpromoted, the call missed and Jet fell through to the
+    # "operation not supported" stub in seg055.
+    72: [0x1074],
 }
 
 
