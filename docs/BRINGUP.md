@@ -1163,26 +1163,37 @@ was my own error. That build had `-DELFISH_TRACE_RUNTIME` but not
 compiled out rather than absent. **Run both defines together when correlating
 DOS traffic with anything else.**
 
-## Frontier: an RMS slot used without being opened
+## Frontier: a null RMS slot pointer
 
-`ds:[785Ah]` is selector **0x4014**, Jet's RMS segment; `seg061_2364` reads the
-handle for a transfer out of `es:[si]` there. Watching that field with both
-trace defines on shows it working correctly for the slot at 0x16:
+`ds:[785Ah]` is selector **0x4014**, Jet's RMS segment. `seg061_2364` reads the
+handle for a transfer out of `es:[si]` there, with `si = bx` -- and `bx` is a
+**slot pointer**, not an index. Slots sit at 0x16, 0x228, 0x43A ... 0x212 apart.
+
+Dumping `bx` at every `seg061_2364` entry (`-DCATZ_ARGS_OF='"seg061_2364"'`)
+against the DOS log settles it. The calls before the failure use 0x16 and
+0x228 and work; the one immediately before it is
 
 ```
-4014:0016 <- 00     (rep stosb clears the slot)
-4014:0016 <- 0005   (the handle of the file just opened)
-...
-AH=42 FAILED ax=0006 bx=043A
+[ARGS] seg061_2364 #7  ax=0000 bx=0000 cx=0043 si=00EE ...
+[dos]  AH=42 FAILED ax=0006 bx=043A from ... seg061_2364 seg061_01A8 seg061_0119
 ```
 
-So slot 0x16 is opened and filled properly, and the failing transfer is using a
-**different** slot -- one whose handle field still reads 0x43A. Slots are
-0x212 apart starting at 0x16, so 0x43A is the third slot's own base address:
-the field looks like an unconsumed free-list link, the same shape as the
-`seg084` ISAM slot bug fixed earlier today.
+**bx = 0.** That is not a slot -- it is the base of the array, and
+`4014:[0000]` holds **0x043A**, which is the free-list head (the third slot's
+own address). Jet read the list head as a file handle and seeked on it.
 
-Next step is mechanical: dump `bx` at every `seg061_2364` entry
-(`-DCATZ_ARGS_OF='"seg061_2364"'` prints registers), find which slot the
-failing call names, and then find why that slot was handed out without being
-opened.
+Watching `4014:[0x16]` with both trace defines on shows the machinery works
+when it is given a real slot: `<- 00` from the clearing `rep stosb`, then
+`<- 0005`, the handle of the file just opened. Nothing is wrong with opening or
+with the slot layout.
+
+So the defect is upstream: something hands this path a null slot pointer.
+`bx` comes from the argument at `[bp+0Eh]`, and it is 0 all the way up through
+`seg061_1CDD` (`lea si,[bx+0EEh]` giving the si=0x00EE in the dump above),
+`seg061_1DAB` (`test byte es:[bx+106h],1` on the array header),
+`seg061_1DE0/1DE5` and `seg061_1E1D`. The whole function was *called* with it.
+
+Next step: keep walking up from `seg061_1CBB` / `seg061_1CDD` to the function's
+real entry, then find its caller and what it thinks it is passing. Either a
+"find the slot for this file" call returned 0 and the result went unchecked, or
+the slot pointer is being lost between there and here.
