@@ -119,6 +119,13 @@ void KERNEL_GLOBALREALLOC(CPU *cpu) {
             cpu->sel_base[hMem] = cpu->sel_base[nsel];
             g_sel_base[hMem] = g_sel_base[nsel];
             g_sel_size[hMem] = g_sel_size[nsel];
+            /* The block now belongs to hMem alone. Leaving nsel's bookkeeping
+             * in place would leave two selectors claiming one block, so a later
+             * GlobalFree of either would dangle the other -- and a write
+             * through the alias is invisible to anything watching the handle. */
+            cpu->sel_base[nsel] = 0;
+            g_sel_base[nsel] = 0;
+            g_sel_size[nsel] = 0;
             cpu->ax = hMem;                 /* same handle, new home */
         } else {
             cpu->ax = nsel;
