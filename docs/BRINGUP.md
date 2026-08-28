@@ -996,3 +996,65 @@ longjmp raised from inside another longjmp's aftermath still finds nothing --
 the ring shows `seg072_421A seg073_0010 ... seg073_0000 seg072_421A`. Whether
 the circular chain is a consequence of those failed unwinds or independent of
 them is the first thing to establish.
+
+## The spin was a missing anchor, not a Jet bug
+
+`JET_SETJMP` was only emitted at FAR call sites. The 30 calls to setjmp from
+inside its own segment are NEAR calls and went through a different branch of
+the lifter, so they planted no anchor. Jet reaches its outermost error handler
+through one of those; a longjmp to it found nothing, fell back to returning,
+and left the C stack standing while the guest stack moved -- which is what put
+the circular link in the hash chain the run was spinning in.
+
+All 197 sites are wrapped now. `jet_longjmp` allows for a near call's 2-byte
+return frame as well as a far call's 4 when matching an anchor to a jmp_buf.
+
+## OF_PARSE, and the workgroup database
+
+`OpenFile` with `OF_PARSE` (0100h) fills the OFSTRUCT with a fully-qualified
+path and **opens nothing**; 0, not a handle, is success. The shim ignored the
+flag and tried to open, so a file that was not there came back -1 -- which Jet
+reads as "invalid path" and raises -1023 over. That was `seg082_0202`, and it
+was the last thing standing between Jet and its workgroup database.
+
+The OFSTRUCT now also gets a DOS path rather than the host one. `szPathName`
+is a field in a 128-byte struct that callers parse and hand back, so writing
+`game/install/...` into it was both too long for the field and meaningless to
+the guest -- and Jet has its own bounds check on it (`seg058_005F`) that raises
+the same -1023. `bob_resolve` takes the basename anyway.
+
+With that in place Jet does what it had been trying to do all along:
+
+```
+[file] OpenFile 'system.mdb' style=0100
+[file] open 'C:\system.mdb' -> game/install/system.mdb OK
+[dos] open 'C:\system.mdb' -> 7
+[file] open 'C:\system.ldb' -> game/install/system.ldb OK
+```
+
+It opens Bob's shipped SYSTEM.MDB and takes its `.ldb` lock.
+
+## Frontier: an ISAM entry point that is still the "unsupported" stub
+
+Zero Jet errors are raised, zero longjmps go unmatched, zero stack purges are
+guessed, and the host runs 18,258 lifted calls. The login still returns
+failure, but the code has changed from -1003 to **-1310**, and that one is not
+raised anywhere interesting -- it is simply *returned* by `seg055_0000` /
+`seg055_0007`.
+
+`seg055` is a table of near-identical three-instruction functions:
+
+```
+mov ax, 0FAE2h      ; -1310
+cwd
+retf <n>            ; n = 8, 0Ch, 10h, ... one per signature
+```
+
+That is Jet's **"operation not supported"** placeholder, one entry per calling
+convention, and a driver's dispatch table is filled with them for the
+operations it does not implement. So Jet is now dispatching a real ISAM
+operation through a table whose slot still points at the placeholder.
+
+The next question is which table and which slot -- i.e. what should have
+overwritten that entry when the native driver registered itself. That is a
+step *past* opening the database, so the direction is right.
