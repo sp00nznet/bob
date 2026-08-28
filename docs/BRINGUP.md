@@ -1134,3 +1134,22 @@ the right one. Either the FCB was never given the handle of the file Jet
 opened, or `bx` is indexing the wrong FCB. Establishing which is the next step:
 watch the handle field of the FCB Jet opens `system.mdb` into and see whether
 anything writes 7 to it.
+
+### Following the bad handle, and what is not yet proven
+
+`ds:[785Ah]` holds selector **0x4014**, Jet's RMS segment. `seg061_2364` reads
+its "handle" out of a structure there at `es:[si]`, and the offsets it uses are
+0x16 and 0x228 -- spaced 0x212 apart. Note that `0x16 + 2 * 0x212 = 0x43A`,
+which is exactly the bad handle, so the field plausibly still holds a
+free-list link rather than a handle. **That is a suggestive coincidence, not a
+proof**; do not build on it without checking.
+
+Watching `4014:[0x16]` shows the field written only with **zeros**, by a
+`rep stosb` from `seg061_1249 / 1FF2 / 1224 / 1238`. Nothing ever writes a file
+handle there.
+
+One caveat that matters for the next session: the `AH=42 FAILED bx=043A` line
+**did not reproduce** in the watch run, though the -1022 still did (from
+`seg064_03BE`). So the lseek failure is path-dependent and may be a
+consequence rather than the cause. The two -1022 raisers -- `seg061_1E5B` and
+`seg064_03BE` -- should be separated before assuming they are the same bug.
