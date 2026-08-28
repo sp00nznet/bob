@@ -396,5 +396,15 @@ void KERNEL_DOS3CALL(CPU *cpu) {
         cpu->ax = 0x01; cpu->flags |= FLAG_CF;     /* invalid function */
         break;
     }
+    /* Jet turns any CF-set DOS answer into an error code, so a failing call is always worth a line. */
+    if (cpu->flags & FLAG_CF)
+    {
+        FIO_LOG("[dos] AH=%02X FAILED ax=%04X bx=%04X cx=%04X dx=%04X from",
+                ah, cpu->ax, cpu->bx, cpu->cx, cpu->dx);
+        { int _i; for (_i = 6; _i > 0; _i--) {
+            const char *n = g_fn_ring[(g_fn_ring_pos - (unsigned)_i) & (CATZ_FN_RING_SIZE - 1)];
+            if (n) FIO_LOG(" %s", n); } }
+        FIO_LOG("\n");
+    }
     cpu->sp += 4;                            /* far return; no stack args */
 }

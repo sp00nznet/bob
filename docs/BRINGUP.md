@@ -1091,3 +1091,46 @@ places, `seg061_1E5B` (via `seg061_1224/1238/1249`) and `seg064_03BE` (via
 `seg061_004C`. Both call sites look like the same class as the ones already
 fixed -- a DOS or Win16 answer Jet reads as a failure -- so the next step is
 the same: find which call returns what, and why.
+
+### Every failing DOS call now names itself
+
+`KERNEL_DOS3CALL` logs any call that returns with CF set, with the registers
+and the call ring. Jet turns a CF-set answer into an error code, so a failing
+DOS call is always worth a line, and this is the cheapest way to tell a
+*deliberate* probe from a real problem.
+
+A run currently shows three, and two of them are fine:
+
+```
+AH=3D FAILED ax=0002 ... from ... seg061_008B seg061_004C   <- open system.ldb
+AH=43 FAILED ax=0002 ... from ... seg061_00B6 seg061_004C   <- does it exist?
+```
+
+Both are Jet probing for the lock file before creating it -- `[dos] open
+'C:'ldb -> 8` follows immediately. The third is not:
+
+```
+AH=42 FAILED ax=0006 bx=043A cx=0000 dx=0000
+      from seg061_1DE5 seg061_1E1D seg061_2364 seg061_01A8 seg061_0119 seg061_004C
+```
+
+Error 6 is "invalid handle", and 0x043A is not a handle we ever issued -- the
+run hands out 5, 6, 7 and 8.
+
+## Frontier: a Jet file-control block whose handle field is wrong
+
+`seg061_0119` is Jet's page read/write: seek to `page << 11`, then read or
+write 0x800 bytes, with the DOS handle in `[bp+0Ch]`. `seg061_01A8` forwards
+its own arguments to it, and the handle originates one frame further up:
+
+```
+seg061_2364:  si = bx                       ; bx is an FCB pointer
+              es = ds:[785Ah]               ; Jet's FCB segment
+              push es:[si]                  ; the handle field -> 043Ah
+```
+
+`ds:[785Ah]` is the same FCB segment `seg057_0908` uses, so the structure is
+the right one. Either the FCB was never given the handle of the file Jet
+opened, or `bx` is indexing the wrong FCB. Establishing which is the next step:
+watch the handle field of the FCB Jet opens `system.mdb` into and see whether
+anything writes 7 to it.
