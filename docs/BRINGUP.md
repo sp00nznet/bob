@@ -1135,21 +1135,54 @@ opened, or `bx` is indexing the wrong FCB. Establishing which is the next step:
 watch the handle field of the FCB Jet opens `system.mdb` into and see whether
 anything writes 7 to it.
 
-### Following the bad handle, and what is not yet proven
+### -1022 is DOS error 6, and Jet says so itself
 
-`ds:[785Ah]` holds selector **0x4014**, Jet's RMS segment. `seg061_2364` reads
-its "handle" out of a structure there at `es:[si]`, and the offsets it uses are
-0x16 and 0x228 -- spaced 0x212 apart. Note that `0x16 + 2 * 0x212 = 0x43A`,
-which is exactly the bad handle, so the field plausibly still holds a
-free-list link rather than a handle. **That is a suggestive coincidence, not a
-proof**; do not build on it without checking.
+`seg061_0054` is the DOS-failure handler. It calls `AH=59h` (get extended
+error), checks for 53h, and then `seg061_0073` / `seg061_007B` walk a table of
+nineteen (DOS error, Jet error) pairs sitting at **`seg61:0000`**, in the code
+segment. Dumping it settles the whole question:
 
-Watching `4014:[0x16]` shows the field written only with **zeros**, by a
-`rep stosb` from `seg061_1249 / 1FF2 / 1224 / 1238`. Nothing ever writes a file
-handle there.
+```
+DOS  1 -> -1906     DOS 18 -> -1020     DOS 33 -> -1025
+DOS  2 -> -1811     DOS 19 -> -1032     DOS 36 -> -1033
+DOS  3 -> -1023     DOS 20 -> -1023     DOS 53 -> -1023
+DOS  4 -> -1807     DOS 21 -> -1021     DOS 55 -> -1022
+DOS  5 -> -1032     DOS 27 -> -1021     DOS 65 -> -1032
+DOS  6 -> -1022     DOS 32 -> -1024     DOS 112 -> -1808
+DOS 15 -> -1023
+```
 
-One caveat that matters for the next session: the `AH=42 FAILED bx=043A` line
-**did not reproduce** in the watch run, though the -1022 still did (from
-`seg064_03BE`). So the lseek failure is path-dependent and may be a
-consequence rather than the cause. The two -1022 raisers -- `seg061_1E5B` and
-`seg064_03BE` -- should be separated before assuming they are the same bug.
+**-1022 is the mapping for DOS error 6, invalid handle** -- so it is exactly
+the `AH=42 FAILED ax=0006 bx=043A` lseek, and the two are one bug after all.
+(0xFC02 is *also* what the loop falls through to when nothing matches, which is
+what made it look like "unknown error" at first. It is not: the table hits.)
+
+Correcting the previous note: that failure "not reproducing" under the watch
+was my own error. That build had `-DELFISH_TRACE_RUNTIME` but not
+`-DCATZ_TRACE_WIN16`, and `FIO_LOG` is gated on the latter, so the line was
+compiled out rather than absent. **Run both defines together when correlating
+DOS traffic with anything else.**
+
+## Frontier: an RMS slot used without being opened
+
+`ds:[785Ah]` is selector **0x4014**, Jet's RMS segment; `seg061_2364` reads the
+handle for a transfer out of `es:[si]` there. Watching that field with both
+trace defines on shows it working correctly for the slot at 0x16:
+
+```
+4014:0016 <- 00     (rep stosb clears the slot)
+4014:0016 <- 0005   (the handle of the file just opened)
+...
+AH=42 FAILED ax=0006 bx=043A
+```
+
+So slot 0x16 is opened and filled properly, and the failing transfer is using a
+**different** slot -- one whose handle field still reads 0x43A. Slots are
+0x212 apart starting at 0x16, so 0x43A is the third slot's own base address:
+the field looks like an unconsumed free-list link, the same shape as the
+`seg084` ISAM slot bug fixed earlier today.
+
+Next step is mechanical: dump `bx` at every `seg061_2364` entry
+(`-DCATZ_ARGS_OF='"seg061_2364"'` prints registers), find which slot the
+failing call names, and then find why that slot was handed out without being
+opened.
