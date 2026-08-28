@@ -249,8 +249,16 @@ class NELifter(Lifter):
             target = op1.disp
             func_name = f'seg{self.seg.index:03d}_{target:04X}'
             self.func_calls.add(func_name)
-            self._emit(f'push16(cpu, 0xFFFF);', 'near call return addr')
-            self._emit(f'{func_name}(cpu);', orig)
+            if func_name == getattr(self, 'setjmp_fn', None):
+                # Guest setjmp reached by a NEAR call -- the 30 sites inside
+                # setjmp's own segment. Same anchor as the far form, but the
+                # call site pushes 2 bytes rather than 4, which jet_longjmp
+                # allows for when matching.
+                self._emit(f'if (JET_SETJMP(cpu) == 0) {{ push16(cpu, 0xFFFF); '
+                           f'{func_name}(cpu); }}', orig)
+            else:
+                self._emit(f'push16(cpu, 0xFFFF);', 'near call return addr')
+                self._emit(f'{func_name}(cpu);', orig)
             return
 
         # --- Relocated immediates: `mov reg/mem, SELECTOR|OFFSET of symbol` ---
