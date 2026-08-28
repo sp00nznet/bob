@@ -118,18 +118,23 @@ MFC's subclass-on-`WM_NCCREATE` through the captured `WH_CALLWNDPROC` hook, so t
 main window ("AfxFrameOrView" / "Daemon") is created and attached
 (`m_hWnd` set, added to MFC's HWND map).
 
-**Current frontier - a circular list in Jet's hash chain.** Chasing the DAO
-login's -1003 into Jet's ISAM slot allocator turned up a **lifter** bug, not a
-Jet one: `IMUL r16, r/m16, imm` (opcodes 69h/6Bh) is the 80186 *three-operand*
-form, and the decoder was throwing the source operand away -- so
-`imul bx, [bp-2], 19Eh` lifted as `bx = bx * 19Eh`. **762 instructions across
-Bob were affected.** Jet's slot allocator was indexing its table with a
-leftover pointer, which is why the slot's `"system.mdb"` name field was never
-written and every ISAM lookup failed.
+**Current frontier - an ISAM slot still pointing at the "unsupported" stub.**
+Three fixes this round took Jet a long way. A **lifter** bug first:
+`IMUL r16, r/m16, imm` (69h/6Bh) is the 80186 *three-operand* form and the
+decoder was discarding the source, so `imul bx, [bp-2], 19Eh` lifted as
+`bx = bx * 19Eh` -- **762 instructions across Bob**, one of them the index into
+Jet's ISAM slot table. Then `JET_SETJMP` was only wrapping FAR call sites, so
+the 30 near calls to setjmp planted no anchor and a longjmp to Jet's outermost
+handler unwound nothing. Then `OpenFile`'s `OF_PARSE` (fill the path, open
+nothing) was unimplemented.
 
-With that fixed the run reaches an order of magnitude more Jet code (38k trace
-lines -> 505k) and now spins in a hash-chain walk (`seg086_02EC`) whose links
-are circular. See [docs/BRINGUP.md](docs/BRINGUP.md).
+With those, **Jet opens Bob's shipped SYSTEM.MDB and takes its `.ldb` lock**,
+raises no errors, leaves no longjmp unmatched and no stack purge guessed, and
+InitInstance runs 13,102 -> 18,258 lifted calls. It still returns FALSE, now
+with -1310 -- which is not raised but simply *returned* by `seg055`, Jet's
+table of "operation not supported" placeholders. Something that should have
+registered a native ISAM entry point has not. See
+[docs/BRINGUP.md](docs/BRINGUP.md).
 
 ### How it lifts (the three modules → one program)
 
