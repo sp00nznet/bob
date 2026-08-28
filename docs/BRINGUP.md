@@ -1058,3 +1058,36 @@ operation through a table whose slot still points at the placeholder.
 The next question is which table and which slot -- i.e. what should have
 overwritten that entry when the native driver registered itself. That is a
 step *past* opening the database, so the direction is right.
+
+## Past the "unsupported" stub: a runtime dispatch table
+
+The -1310 came from a `dispatch_far MISS seg=72 off=1074` a few calls earlier.
+`seg072_1074` is `enter 54h, 0` sitting immediately after a `ret 0Eh` and a
+`nop` pad -- an unmistakable function start that IDA never marked, because Jet
+builds the table that points at it **at runtime**: no relocation names it, so
+`scan_vtable_farptrs` cannot find it either. `FORCE_PROMOTE` gained a
+`72: [0x1074]` entry, which is what that mechanism is for. Unpromoted, the
+indirect call missed and Jet fell through to the "operation not supported"
+placeholder in `seg055`.
+
+## GlobalReAlloc must keep the handle
+
+Win16 guarantees the **handle** survives a `GlobalReAlloc` even when the block
+moves -- only the address changes. Our shim allocated a new selector, copied,
+freed the old one and returned the new selector. Jet reallocates a buffer and
+then asks `GlobalSize` about the selector it still holds; a freed one answers
+0, and `seg076_0000` raises -1011 ("out of memory") on that.
+
+Selectors here are an index into `sel_base`, so the block can move under the
+same handle, which is exactly the Win16 contract. The old block still goes back
+to the free pool.
+
+## Frontier: -1022
+
+The error walk this round: **-1003 -> -1310 -> -1011 -> -1022**, each one a
+different thing that was wrong, each fixed. -1022 is now raised from two
+places, `seg061_1E5B` (via `seg061_1224/1238/1249`) and `seg064_03BE` (via
+`seg064_049F/04D0/0F54`), both reached through Jet's DOS-call wrapper
+`seg061_004C`. Both call sites look like the same class as the ones already
+fixed -- a DOS or Win16 answer Jet reads as a failure -- so the next step is
+the same: find which call returns what, and why.
