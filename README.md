@@ -27,6 +27,9 @@ dependencies: the **Jet/Access** database engine (Bob's data store) and
 | **UTOPIA.DLL**   | 1.05 MB | Engine: rooms, actors, data store, rendering | NE, MFC, 22 code segs, 71 exports |
 | **UTOPIAWA.EXE** | 356 KB  | Host: WinMain, main window, message loop | NE, MFC, 9 code segs |
 | **UEXTRA.DLL**   | 11 KB   | RLE / transparent-DIB blit helpers (actor cels) | NE, 2 code segs |
+| MSAJT110.DLL     | —       | Jet 1.1 database engine (Bob's data store) | NE, 104 code + 2 data segs |
+| MSABC110.DLL     | —       | Access Basic runtime (Jet's query path calls it) | NE, 73 code segs, no DGROUP |
+| MSAES110.DLL     | —       | Access Expression Service | NE, 7 code segs + DGROUP |
 | ACTORS\*.ACT     | ~0.3 MB ea | 12 guides — animation cels + embedded voice WAVs | "LP" actor format |
 
 UTOPIA.DLL's 22 code segments form a **single connected cluster** — one coherent
@@ -35,12 +38,13 @@ engine, no dead code islands to triage.
 ## Pipeline
 
 ```
-ne_parse   ->  segments, relocations, imports, entry/export tables   [DONE]
-ne_xref    ->  segment clusters + per-segment import usage           [DONE]
-act_parse  ->  actor (.ACT) header + embedded WAV/string survey      [DONE]
-ida_export ->  authoritative function bounds + Win16 ordinal->name   (next)
+ne_parse   ->  segments, relocations, imports, entry/export tables
+ne_xref    ->  segment clusters + per-segment import usage
+act_parse  ->  actor (.ACT) header + embedded WAV/string survey
+ida_export ->  authoritative function bounds + Win16 ordinal->name
 ne_decode  ->  IDA-assisted 16-bit disassembly (relocations inline)
-ne_lift    ->  one C file per code segment; x87 -> native doubles
+lift_combined / ne_lift -> six modules, one segment space, one C file per
+              code segment; x87 -> native doubles
 gen_image / gen_segments_h / gen_dispatch / gen_stubs  ->  glue
 runtime/   ->  Win16 shims (KERNEL/USER/GDI/WING/WAVMIX16/Jet) + host loop
 ```
@@ -50,7 +54,8 @@ runtime/   ->  Win16 shims (KERNEL/USER/GDI/WING/WAVMIX16/Jet) + host loop
 ```
 tools/       NE toolchain (from catz/pcrecomp) + act_parse.py (actor probe)
 runtime/     cpu.h (CPU+FPU model), Win16 shims, host loop (main.c, TBD)
-src/         lifted C, one seg*.c per code segment (generated)
+src/         lifted C, one seg*.c per code segment -- generated locally from
+             your own copy, never committed (only _exports.c, a table, is)
 analysis/    recon outputs (NE parse dumps, imports, clusters, actor survey)
 build_data/  flat memory image (generated, gitignored)
 game/        original Bob binaries + media (gitignored, not redistributable)
@@ -59,13 +64,11 @@ docs/        ARCHITECTURE.md — module map, imports, actor format, milestones
 
 ## Building
 
-```bash
-cmake -B build            # 16-bit origin -> 32-bit native target
-cmake --build build
-```
-
-(There is nothing to link yet — the lift stage has not run. The CMake graph is
-in place so the build lights up as `src/seg*.c` and `runtime/main.c` land.)
+**The lifted C is not in this repository.** `src/seg*.c`, `src/_dispatch.c`
+and `src/_unresolved_stubs.c` are a mechanical translation of Microsoft's code,
+so they are a derivative of it and are gitignored. You generate them from your
+own copy of Bob — see [Build & lift](#build--lift-full-reproducible) below. A
+fresh clone has no `src/seg*.c`, and CMake builds nothing until the lift runs.
 
 ## Getting the binaries
 
@@ -77,9 +80,10 @@ your own OEM/retail disc, then extract:
 7z x game/iso/U1.CAB -ogame/install   # UTOPIA.DLL, UTOPIAWA.EXE, ACTORS\*.ACT, ...
 ```
 
-## Status: Bringup — InitInstance runs end-to-end; frontier is the Jet/DAO login
+## Status: Bringup — InitInstance runs Jet for real; frontier is Jet error -1022
 
-All three modules lift to link-clean C. The recompiled **engine LibMain
+All six modules — Bob's three plus the Jet 1.1 stack (MSAJT110, MSABC110,
+MSAES110), lifted rather than faked — lift to link-clean C. The recompiled **engine LibMain
 initializes cleanly** (`ax=0001`), the **host runs its full MFC AfxWinMain**,
 and **`CWinApp::InitInstance` now dispatches and executes Bob's real startup
 code**. A Unicorn differential harness (`tools/uni_host.py`) runs the *original*
@@ -128,21 +132,38 @@ Bob's shipped SYSTEM.MDB and taking its `.ldb` lock**.
 
 InitInstance runs 13,102 -> 18,386 lifted calls with zero unmatched longjmps,
 zero guessed stack purges and three dispatch misses left (all in engine
-LibMain). See [docs/BRINGUP.md](docs/BRINGUP.md).
+LibMain).
 
-### How it lifts (the three modules → one program)
+**-1022 is now traced end to end.** It is Jet's own mapping of DOS error 6,
+*invalid handle*, read out of a nineteen-entry (DOS, Jet) table in Jet's code
+segment. The failing call is an `lseek` on handle `043Ah`, which the runtime
+never issued: `seg077_0072` passes the `+2` field of the object at
+`4014:427Eh` as a file-slot pointer, that field is **0**, and everything below
+it correctly reads the slot array's free-list head as a handle. The slot
+machinery itself works (other paths use it successfully), so the open question
+is why that one object field is never written. See
+[docs/BRINGUP.md](docs/BRINGUP.md).
 
-Recon is complete and **all of Bob's code — engine, host, and blitter — lifts to
-C, compiles, and links clean.** The three modules share one global segment space
-and one static archive; the only unresolved symbols are standard libc.
+### How it lifts (six modules → one program)
+
+**All of Bob's code — engine, host, blitter, and the Jet stack it depends on —
+lifts to C, compiles, and links clean.** The modules share one global segment
+space and one static archive; the only unresolved symbols are standard libc.
 
 | Module | Global segs | Result |
 |--------|-------------|--------|
-| **UTOPIA.DLL** (engine)   | 1–22  | 22 segs lifted (2,685 IDA funcs / 280,921 heads) |
-| **UEXTRA.DLL** (blitter)  | 25–26 | 2 segs lifted |
-| **UTOPIAWA.EXE** (host)   | 31–39 | 9 segs lifted (1,541 IDA funcs / 101,829 heads) |
+| **UTOPIA.DLL** (engine)   | 1–24    | 22 code segs lifted (2,685 IDA funcs / 280,921 heads) |
+| **UEXTRA.DLL** (blitter)  | 25–27   | 2 code segs lifted |
+| **UTOPIAWA.EXE** (host)   | 31–40   | 9 code segs lifted (1,541 IDA funcs / 101,829 heads) |
+| **MSAJT110.DLL** (Jet 1.1) | 41–146  | 104 code segs lifted |
+| **MSABC110.DLL** (Access Basic) | 147–219 | 73 code segs lifted |
+| **MSAES110.DLL** (Expression Service) | 220–227 | 7 code segs lifted |
 
-Combined: **34,942 functions across 33 code segments**, dispatcher over all of
+The Jet DLLs started as stubs; the Jet/EB query path calls into them, and the
+stubs made thunk-dispatched Jet code run away, so they are lifted faithfully
+instead — which is what lets Jet open Bob's real `SYSTEM.MDB`.
+
+For the first three modules alone: **34,942 functions across 33 code segments**, dispatcher over all of
 them, **16 unresolved stubs out of 32,618 distinct call targets**. Builds with
 mingw gcc to a 39-object / 27 MB static archive — **0 errors, 0 warnings**, and
 **0 non-libc undefined symbols**. Host→engine calls (`UTOPIAWA`→`UTOPIA`, by
@@ -199,14 +220,22 @@ Toolkit fixes made along the way (folded back into `tools/`):
 
 ### Build & lift (full, reproducible)
 
+Everything below runs against **your own** Bob install in `game/install/`
+(see [Getting the binaries](#getting-the-binaries)); the Jet DLLs ship on the
+same disc. Steps 2–4 write the generated files this repo does not track.
+
 ```bash
-# 1. IDA code maps (idalib, py 3.11) — accumulates analysis/win16_imports.json
+# 1. IDA code maps (idalib, py 3.11) — accumulates analysis/win16_imports.json.
+#    Optional: the analysis/*_ida.json maps are committed (addresses only).
 py -3.11 tools/ida_export.py game/install/UTOPIA.DLL            analysis/utopia_ida.json
 py -3.11 tools/ida_export.py game/install/UEXTRA.DLL           analysis/uextra_ida.json
 py -3.11 tools/ida_export.py game/install/UTOPIAWA/UTOPIAWA.EXE analysis/utopiawa_ida.json
-# 2. Lift all three modules into one segment space
+py -3.11 tools/ida_export.py game/install/MSAJT110.DLL          analysis/msajt110_ida.json
+py -3.11 tools/ida_export.py game/install/MSABC110.DLL          analysis/msabc110_ida.json
+py -3.11 tools/ida_export.py game/install/MSAES110.DLL          analysis/msaes110_ida.json
+# 2. Lift all six modules into one segment space -> src/seg*.c, src/_exports.c
 py -3.11 tools/lift_combined.py
-# 3. Regenerate glue across all modules
+# 3. Regenerate glue -> src/_unresolved_stubs.c, src/_dispatch.c, runtime stubs
 py -3.11 tools/gen_stubs.py && py -3.11 tools/gen_dispatch.py
 py -3.11 tools/gen_win16_stubs.py game/install/UTOPIA.DLL game/install/UEXTRA.DLL game/install/UTOPIAWA/UTOPIAWA.EXE
 py -3.11 tools/gen_segments_h.py
@@ -215,18 +244,26 @@ py -3.11 tools/gen_image_bob.py
 # 5. Build + run (mingw gcc must be on PATH: export PATH=/c/msys64/mingw64/bin:$PATH)
 cmake -B build -G Ninja && cmake --build build
 ./build/bob.exe build_data/mem_image.bin
+# (or tools/build.sh [trace|normal] — the parallel gcc build the bring-up uses)
 ```
 
 ### Roadmap
 
 1. ✅ Recon — module map, imports, clusters, actor format
-2. ✅ IDA code map + lift — **all three modules lift to link-clean C**
-3. 🟦 Bringup — engine init + host InitInstance run; **blocked on the Jet/DAO login**
+2. ✅ IDA code map + lift — **all six modules lift to link-clean C**
+3. 🟦 Bringup — engine init + host InitInstance run, Jet opens SYSTEM.MDB;
+   **blocked on Jet error -1022** (an uninitialised RMS object field)
 4. ⬜ First frame — render the Bob house room (WinG/DIB)
 5. ⬜ One actor on screen — load ROVER.ACT, draw a cel, play a voice clip
 6. ⬜ **LLM speech** — LLM + TTS drive the actor's existing animation/voice channel
 
 ## License
 
-Recompilation tooling and new code: MIT. Original Microsoft Bob assets and
-binaries are © Microsoft and are **not** included or redistributed.
+MIT for the tooling, runtime and hand-written code — see [LICENSE](LICENSE).
+Microsoft Bob, its binaries, its data files, and the C lifted from them are
+© Microsoft and are **not** covered by that grant and **not** included here:
+no executables, DLLs, databases, actor files or lifted code are tracked. What
+*is* tracked from the binaries is metadata — function addresses and import
+tables under `analysis/` — plus a handful of generated tables and stubs
+(`src/_exports.c`, `runtime/runtime_api.h`, `runtime/win16/win16_stubs.c`)
+that name addresses and imports but contain none of Bob's instructions.
