@@ -51,3 +51,8 @@ Desktop.ini
 
 # Harness traces (generated)
 work/*.log
+
+# Lifted output: a derivative of Microsoft's code, generated from your own copy
+src/seg*.c
+src/_dispatch.c
+src/_unresolved_stubs.c
