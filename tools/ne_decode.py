@@ -288,6 +288,11 @@ def detect_functions(seg: Segment, instructions: list, forced_entries=None) -> l
                         nxt.op1 and nxt.op1.type == OpType.REG16 and nxt.op1.reg == 5 and
                         nxt.op2 and nxt.op2.type == OpType.REG16 and nxt.op2.reg == 4):
                     starts.add(local_off)
+        # `enter N, 0` is the other prologue, and Jet uses it throughout. Its
+        # ISAM entry points are reached only through tables built at run time,
+        # so no relocation or call names them; this is the only marker they have.
+        if inst.mnemonic == 'enter':
+            starts.add(local_off)
         if (inst.mnemonic in _BRANCH and inst.op1 and
                 inst.op1.type in (OpType.REL8, OpType.REL16)):
             # Every relative branch target becomes an entry (basic-block model).
@@ -297,6 +302,23 @@ def detect_functions(seg: Segment, instructions: list, forced_entries=None) -> l
             tgt = inst.op1.disp
             if tgt in valid:
                 starts.add(tgt)
+        # A switch: `jmp word cs:[bx+table]`. The arms are branch targets too,
+        # but only the table names them, so without this they land mid-function
+        # and the indirect jump dispatch-misses. The table length is not encoded,
+        # so take words while they are instruction heads -- a stray extra entry
+        # only over-splits, which the basic-block model above already tolerates.
+        if (inst.mnemonic in ('jmp', 'call') and inst.op1 is not None
+                and inst.op1.type == OpType.MEM and inst.op1.seg == 'cs'
+                and inst.op1.size == 2):
+            t = inst.op1.disp & 0xFFFF
+            for _ in range(256):
+                if t + 2 > len(seg.data):
+                    break
+                v = seg.data[t] | (seg.data[t + 1] << 8)
+                if v not in valid:
+                    break
+                starts.add(v)
+                t += 2
 
         # Immediate values that are valid instruction boundaries are likely
         # near function pointers (method tables, callbacks) loaded as bare

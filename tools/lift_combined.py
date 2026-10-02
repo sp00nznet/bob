@@ -79,7 +79,9 @@ FORCE_PROMOTE = {
     # seg072:1074 is `enter 54h,0` right after a `ret 0Eh` and a nop pad -- a
     # clean prologue; unpromoted, the call missed and Jet fell through to the
     # "operation not supported" stub in seg055.
-    72: [0x1074],
+    72: [0x1074,
+         0x1138, 0x28D6, 0x29F6],  # same table, reached once the switch arms
+                                   # lifted; each is `enter` after `leave; retf N`
 }
 
 
