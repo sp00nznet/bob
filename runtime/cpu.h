@@ -60,6 +60,10 @@ struct CPU; extern struct CPU *g_cpu;
 #else
 #define TRACE_FN(n) (g_fn_ring[(g_fn_ring_pos++) & (CATZ_FN_RING_SIZE-1)] = (n))
 #endif
+/* Upstream lift16 hooks. TRACE_FN already records every entry, and the host
+ * loop has its own watchdog, so both are no-ops here. */
+#define RECOMP_ENTER(n) ((void)0)
+#define RECOMP_TICK(cpu) ((void)0)
 
 /* ── Flag bits ─────────────────────────────────────────────── */
 
@@ -595,5 +599,129 @@ static inline void port_out16(CPU *cpu, uint16_t port, uint16_t val) {
 static inline void catz_div0(const char *what) {
     fprintf(stderr, "[cpu] divide by zero in %s\n", what);
 }
+
+/* ---- Ported from pcrecomp runtime/win16/cpu.h ----
+ * The upstream lifter emits these since 2026-09: ADC/SBB with carry-in and
+ * the BCD adjusts. Copied verbatim; upstream is the source of truth. */
+
+static inline uint32_t flags_adc(CPU *cpu, uint32_t a, uint32_t b, int bits)
+{
+    uint32_t mask   = (bits == 32) ? 0xFFFFFFFFu : ((1u << bits) - 1u);
+    uint32_t sign   = 1u << (bits - 1);
+    uint64_t c      = (cpu->flags & FLAG_CF) ? 1u : 0u;
+    uint64_t wide   = (uint64_t)(a & mask) + (uint64_t)(b & mask) + c;
+    uint32_t result = (uint32_t)wide & mask;
+
+    a &= mask; b &= mask;
+    cpu->flags &= ~(FLAG_CF | FLAG_OF | FLAG_AF | FLAG_SF | FLAG_ZF | FLAG_PF);
+    if (wide > (uint64_t)mask)              cpu->flags |= FLAG_CF;
+    if ((~(a ^ b) & (a ^ result)) & sign)   cpu->flags |= FLAG_OF;
+    if ((a ^ b ^ result) & 0x10)            cpu->flags |= FLAG_AF;
+    if (result == 0)                        cpu->flags |= FLAG_ZF;
+    if (result & sign)                      cpu->flags |= FLAG_SF;
+    if (parity8((uint8_t)result))           cpu->flags |= FLAG_PF;
+    return result;
+}
+
+static inline uint32_t flags_sbb(CPU *cpu, uint32_t a, uint32_t b, int bits)
+{
+    uint32_t mask   = (bits == 32) ? 0xFFFFFFFFu : ((1u << bits) - 1u);
+    uint32_t sign   = 1u << (bits - 1);
+    uint64_t c      = (cpu->flags & FLAG_CF) ? 1u : 0u;
+    uint32_t result;
+
+    a &= mask; b &= mask;
+    result = (uint32_t)((uint64_t)a - (uint64_t)b - c) & mask;
+    cpu->flags &= ~(FLAG_CF | FLAG_OF | FLAG_AF | FLAG_SF | FLAG_ZF | FLAG_PF);
+    if ((uint64_t)a < (uint64_t)b + c)      cpu->flags |= FLAG_CF;
+    if (((a ^ b) & (a ^ result)) & sign)    cpu->flags |= FLAG_OF;
+    if ((a ^ b ^ result) & 0x10)            cpu->flags |= FLAG_AF;
+    if (result == 0)                        cpu->flags |= FLAG_ZF;
+    if (result & sign)                      cpu->flags |= FLAG_SF;
+    if (parity8((uint8_t)result))           cpu->flags |= FLAG_PF;
+    return result;
+}
+
+static inline void bcd_daa(CPU *cpu)
+{
+    uint8_t old_al = cpu->al;
+    int old_cf = (cpu->flags & FLAG_CF) != 0;
+
+    cpu->flags &= ~FLAG_CF;
+    if ((cpu->al & 0x0F) > 9 || (cpu->flags & FLAG_AF)) {
+        cpu->al = (uint8_t)(cpu->al + 6);
+        cpu->flags |= FLAG_AF;
+    } else {
+        cpu->flags &= ~FLAG_AF;
+    }
+    if (old_al > 0x99 || old_cf) {
+        cpu->al = (uint8_t)(cpu->al + 0x60);
+        cpu->flags |= FLAG_CF;
+    }
+    set_szp8(cpu, cpu->al);
+}
+
+static inline void bcd_das(CPU *cpu)
+{
+    uint8_t old_al = cpu->al;
+    int old_cf = (cpu->flags & FLAG_CF) != 0;
+
+    cpu->flags &= ~FLAG_CF;
+    if ((cpu->al & 0x0F) > 9 || (cpu->flags & FLAG_AF)) {
+        if (old_al < 6) cpu->flags |= FLAG_CF;   /* borrow out of AL - 6 */
+        if (old_cf)     cpu->flags |= FLAG_CF;
+        cpu->al = (uint8_t)(cpu->al - 6);
+        cpu->flags |= FLAG_AF;
+    } else {
+        cpu->flags &= ~FLAG_AF;
+    }
+    if (old_al > 0x99 || old_cf) {
+        cpu->al = (uint8_t)(cpu->al - 0x60);
+        cpu->flags |= FLAG_CF;
+    }
+    set_szp8(cpu, cpu->al);
+}
+
+static inline void bcd_aam(CPU *cpu, uint8_t base)
+{
+    if (base == 0) return;
+    cpu->ah = (uint8_t)(cpu->al / base);
+    cpu->al = (uint8_t)(cpu->al % base);
+    set_szp8(cpu, cpu->al);
+}
+
+static inline void bcd_aad(CPU *cpu, uint8_t base)
+{
+    cpu->al = (uint8_t)(cpu->al + cpu->ah * base);
+    cpu->ah = 0;
+    set_szp8(cpu, cpu->al);
+}
+
+static inline void bcd_aaa(CPU *cpu)
+{
+    if ((cpu->al & 0x0F) > 9 || (cpu->flags & FLAG_AF)) {
+        /* AX += 106h, not AL += 6 and AH += 1 separately: the carry out of AL
+           propagates into AH, so AL = 0FFh lands on AH + 2. */
+        cpu->ax = (uint16_t)(cpu->ax + 0x106);
+        cpu->flags |= (FLAG_AF | FLAG_CF);
+    } else {
+        cpu->flags &= ~(FLAG_AF | FLAG_CF);
+    }
+    cpu->al &= 0x0F;
+}
+
+static inline void bcd_aas(CPU *cpu)
+{
+    if ((cpu->al & 0x0F) > 9 || (cpu->flags & FLAG_AF)) {
+        /* AX -= 106h for the same reason: a borrow out of AL takes AH with it. */
+        cpu->ax = (uint16_t)(cpu->ax - 0x106);
+        cpu->flags |= (FLAG_AF | FLAG_CF);
+    } else {
+        cpu->flags &= ~(FLAG_AF | FLAG_CF);
+    }
+    cpu->al &= 0x0F;
+}
+
+#define recomp_div0 catz_div0
 
 #endif /* CATZ_CPU_H */

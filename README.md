@@ -237,7 +237,7 @@ py -3.11 tools/ida_export.py game/install/MSAES110.DLL          analysis/msaes11
 py -3.11 tools/lift_combined.py
 # 3. Regenerate glue -> src/_unresolved_stubs.c, src/_dispatch.c, runtime stubs
 py -3.11 tools/gen_stubs.py && py -3.11 tools/gen_dispatch.py
-py -3.11 tools/gen_win16_stubs.py game/install/UTOPIA.DLL game/install/UEXTRA.DLL game/install/UTOPIAWA/UTOPIAWA.EXE
+py -3.11 tools/gen_win16_stubs.py game/install/UTOPIA.DLL game/install/UEXTRA.DLL game/install/UTOPIAWA/UTOPIAWA.EXE \n    game/install/MSAJT110.DLL game/install/MSABC110.DLL game/install/MSAES110.DLL
 py -3.11 tools/gen_segments_h.py
 # 4. Build the combined flat memory image
 py -3.11 tools/gen_image_bob.py
