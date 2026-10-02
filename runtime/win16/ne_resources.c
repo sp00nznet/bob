@@ -175,7 +175,20 @@ void ne_init(void) {
     register_mod("UTOPIAWA", 40);
 }
 
+/* Win16 never hands out an instance handle below 32 -- callers test
+ * `LoadLibrary(...) <= 32` for failure -- but UTOPIA's and UEXTRA's DGROUP
+ * selectors here are 0x18 and 0x1B. ne_loadlib returns those as 0xE000|sel and
+ * every hinst lookup folds the alias back. */
+#define HINST_ALIAS 0xE000
+uint16_t ne_hinst_canon(uint16_t h) {
+    return ((h & 0xFF00) == HINST_ALIAS) ? (uint16_t)(h & 0xFF) : h;
+}
+static uint16_t hinst_public(uint16_t h) {
+    return h <= 0x20 ? (uint16_t)(HINST_ALIAS | h) : h;
+}
+
 static Mod *mod_by_hinst(uint16_t hinst) {
+    hinst = ne_hinst_canon(hinst);
     for (int i = 0; i < g_nmods; i++) if (g_mods[i].hinst == hinst) return &g_mods[i];
     return NULL;
 }
@@ -199,7 +212,7 @@ uint16_t ne_loadlib(const char *name) {
     normalize(name, base, sizeof base);
     if (base[0] == 0) return 0;
     for (int i = 0; i < g_nmods; i++)
-        if (strcmp(g_mods[i].name, base) == 0) return g_mods[i].hinst;
+        if (strcmp(g_mods[i].name, base) == 0) return hinst_public(g_mods[i].hinst);
     /* Only serve modules that actually ship as game NE files we can parse. */
     if (g_nmods < (int)(sizeof g_mods / sizeof g_mods[0])) {
         uint16_t hinst = (uint16_t)(0xF000 + g_nmods);

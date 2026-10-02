@@ -220,14 +220,18 @@ void KERNEL__LLSEEK(CPU *cpu) {           /* _llseek(hFile, LONG lOffset, iOrigi
 /* The OFSTRUCT's szPathName is a DOS path in a 128-byte struct, and callers
  * parse it and hand it back. Writing the HOST path there ("game/install/...")
  * is both longer than the field and meaningless to the guest, and Jet's own
- * bounds check (seg058_005F) raises -1023 on an over-long one. bob_resolve
- * takes the basename anyway, so a plain drive-qualified name round-trips. */
+ * bounds check (seg058_005F) raises -1023 on an over-long one. Keep the guest's
+ * own relative path under C:\ -- not just the basename, which turned
+ * 'address\abook.mdb' into a C:\abook.mdb that does not exist. */
 static void of_dos_path(const char *guest, char *out, int outsz)
 {
-    const char *base = guest, *p;
-    for (p = guest; *p; p++)
-        if (*p == '/' || *p == '\\') base = p + 1;
-    snprintf(out, outsz, "C:\\%s", base);
+    int j;
+    if (guest[0] && guest[1] == ':') guest += 2;
+    while (*guest == '/' || *guest == '\\') guest++;
+    j = snprintf(out, outsz, "C:\\");
+    for (; *guest && j < outsz - 1; guest++)
+        out[j++] = (*guest == '/') ? '\\' : *guest;
+    out[j] = 0;
 }
 
 static void of_fill(CPU *cpu, uint16_t ofseg, uint16_t ofoff,
@@ -316,6 +320,20 @@ void KERNEL_DOS3CALL(CPU *cpu) {
         for (; n < cpu->cx; n++)
             fputc(mem_read8(cpu, cpu->ds, (uint16_t)(cpu->dx + n)), f);
         cpu->ax = n;
+        break;
+    }
+    case 0x41: {                            /* delete: DS:DX=name */
+        char path[260], host[320];
+        fread_asciiz(cpu, cpu->ds, cpu->dx, path, sizeof path);
+        size_t pl = strlen(path);
+        /* bob_resolve matches by path suffix, so a delete could land on a
+         * shipped database; Jet only ever deletes its scratch and lock files. */
+        if (pl > 4 && _stricmp(path + pl - 4, ".mdb") == 0) {
+            cpu->ax = 0x05; cpu->flags |= FLAG_CF;                  /* access denied */
+        } else if (!bob_resolve(path, host, sizeof host, 1) || remove(host) != 0) {
+            cpu->ax = 0x02; cpu->flags |= FLAG_CF;                  /* not found */
+        }
+        FIO_LOG("[dos] delete '%s' -> %s\n", path, (cpu->flags & FLAG_CF) ? "FAILED" : "ok");
         break;
     }
     case 0x42: {                            /* lseek: AL=origin, BX=handle, CX:DX=off */

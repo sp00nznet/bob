@@ -170,6 +170,16 @@ void KERNEL_GLOBALHANDLE(CPU *cpu) {        /* -> DX:AX = selector:handle (same)
  * CATZDLL's STRINGTABLE; without these it throws KatzError "CATZREZX.DLL did not
  * load" at startup. */
 
+void KERNEL_GETMODULEHANDLE(CPU *cpu) {     /* GetModuleHandle(lpModuleName) */
+    char name[128]; read_asciiz(cpu, a16(cpu, 2), a16(cpu, 0), name, sizeof name);
+    /* ponytail: modules here are always loaded, so this is LoadLibrary without
+     * the fallback handle; a name we do not ship answers 0, as it would. */
+    uint16_t h = a16(cpu, 2) ? ne_loadlib(name) : a16(cpu, 0);
+    IMPL_LOG("[win16] GetModuleHandle(%s) -> %04X\n", name, h);
+    cpu->ax = h;
+    ret(cpu, 4);
+}
+
 void KERNEL_LOADLIBRARY(CPU *cpu) {         /* LoadLibrary(lpLibFileName) */
     char name[128]; read_asciiz(cpu, a16(cpu, 2), a16(cpu, 0), name, sizeof name);
     uint16_t h = ne_loadlib(name);
@@ -181,6 +191,7 @@ void KERNEL_LOADLIBRARY(CPU *cpu) {         /* LoadLibrary(lpLibFileName) */
 
 int ne_get_proc(uint16_t hinst, const char *name, uint16_t ordinal,
                 uint16_t *seg, uint16_t *off) {
+    hinst = ne_hinst_canon(hinst);
     for (int i = 0; i < g_ne_nexports; i++) {
         const NEExport *e = &g_ne_exports[i];
         if (e->hinst != hinst) continue;

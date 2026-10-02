@@ -13,6 +13,7 @@ void ne_init(void);
  * can serve resources from, parse it and return its assigned hInstance handle;
  * otherwise return 0 (caller substitutes a benign handle). */
 uint16_t ne_loadlib(const char *name);
+uint16_t ne_hinst_canon(uint16_t h);
 
 /* LoadString(hinst,id): copy the string into out (<=max, NUL-terminated).
  * Returns length copied, or 0 if not found. */
