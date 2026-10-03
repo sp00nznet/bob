@@ -16,7 +16,7 @@ can actually *converse* instead of replaying a script. See
 Built on the [pcrecomp](https://github.com/sp00nznet/pcrecomp) NE toolchain,
 following [catz](https://github.com/sp00nznet/catz) as the structural template —
 the proven thin-host-EXE + big-engine-DLL Win16 MFC recomp pattern. Bob is the
-same shape (UTOPIAWA.EXE host + UTOPIA.DLL engine) with two extra load-bearing
+same shape (HOME.EXE host + UTOPIA.DLL engine) with two extra load-bearing
 dependencies: the **Jet/Access** database engine (Bob's data store) and
 **WAVMIX16** (the actors' mixed-WAV voices).
 
@@ -25,7 +25,8 @@ dependencies: the **Jet/Access** database engine (Bob's data store) and
 | Binary | Size | Role | Format |
 |--------|------|------|--------|
 | **UTOPIA.DLL**   | 1.05 MB | Engine: rooms, actors, data store, rendering | NE, MFC, 22 code segs, 71 exports |
-| **UTOPIAWA.EXE** | 356 KB  | Host: WinMain, main window, message loop | NE, MFC, 9 code segs |
+| **HOME\HOME.EXE** | 288 KB | Host: the house -- sign-in, rooms, message loop | NE, MFC, 6 code segs |
+| UTOPIAWA.EXE     | 356 KB  | WordArt OLE server -- not the host (see Status) | NE, MFC, 9 code segs |
 | **UEXTRA.DLL**   | 11 KB   | RLE / transparent-DIB blit helpers (actor cels) | NE, 2 code segs |
 | MSAJT110.DLL     | —       | Jet 1.1 database engine (Bob's data store) | NE, 104 code + 2 data segs |
 | MSABC110.DLL     | —       | Access Basic runtime (Jet's query path calls it) | NE, 73 code segs, no DGROUP |
@@ -80,7 +81,7 @@ your own OEM/retail disc, then extract:
 7z x game/iso/U1.CAB -ogame/install   # UTOPIA.DLL, UTOPIAWA.EXE, ACTORS\*.ACT, ...
 ```
 
-## Status: Bringup — InitInstance runs Jet for real; frontier is Jet error -1022
+## Status: Bringup — HOME.EXE (the house) runs; Jet opens every database; frontier is a host longjmp
 
 All six modules — Bob's three plus the Jet 1.1 stack (MSAJT110, MSABC110,
 MSAES110), lifted rather than faked — lift to link-clean C. The recompiled **engine LibMain
@@ -122,27 +123,38 @@ MFC's subclass-on-`WM_NCCREATE` through the captured `WH_CALLWNDPROC` hook, so t
 main window ("AfxFrameOrView" / "Daemon") is created and attached
 (`m_hWnd` set, added to MFC's HWND map).
 
-**Current frontier - Jet error -1022.** The DAO login's error code has walked
-**-1003 -> -1310 -> -1011 -> -1022** across this round, each step a different
-real defect: a three-operand `IMUL` the decoder was mis-lifting (762
-instructions), `JET_SETJMP` missing from near call sites, `OpenFile`'s
-`OF_PARSE`, a Jet dispatch-table entry point IDA never marked, and
-`GlobalReAlloc` not preserving its handle. Along the way **Jet started opening
-Bob's shipped SYSTEM.MDB and taking its `.ldb` lock**.
+**The host was the wrong program.** `UTOPIAWA.EXE`, treated as Bob's host
+since the start, is **Microsoft Bob WordArt** -- an OLE LocalServer
+(`UTOPIAWA.REG`). Once the runtime let it get far enough, it said so itself:
+*"You have to use WordArt from within another program."* That was the
+"no main procedure" exit. Bob's house is **`HOME\HOME.EXE`** (MFC NE, 6 code +
+2 data segments, imports UTOPIA by ordinal), and it now sits in the host slot
+(global segments 31..38).
 
-InitInstance runs 13,102 -> 18,386 lifted calls with zero unmatched longjmps,
-zero guessed stack purges and three dispatch misses left (all in engine
-LibMain).
+**Current frontier -- a host `longjmp` with no C frame to land in.** With
+HOME as host, a run reaches **~277,000 lifted calls**: Jet logs in, opens
+`system.mdb`, `utopia.mdb`, `address\abook.mdb` and `upic.mdb`, and HOME loads
+its TIPS resource. Then Jet raises -1601 (record not found -- an ordinary
+error it expects to catch) and the host `longjmp` faults with
+`STATUS_BAD_STACK`: the C frame that made the matching `setjmp` has already
+returned. The fix lives in `runtime/win16/jet_setjmp.c`, the bridge from
+Jet's setjmp/longjmp to the host's.
 
-**-1022 is now traced end to end.** It is Jet's own mapping of DOS error 6,
-*invalid handle*, read out of a nineteen-entry (DOS, Jet) table in Jet's code
-segment. The failing call is an `lseek` on handle `043Ah`, which the runtime
-never issued: `seg077_0072` passes the `+2` field of the object at
-`4014:427Eh` as a file-slot pointer, that field is **0**, and everything below
-it correctly reads the slot array's free-list head as a handle. The slot
-machinery itself works (other paths use it successfully), so the open question
-is why that one object field is never written. See
-[docs/BRINGUP.md](docs/BRINGUP.md).
+What got here, this round (details in [docs/BRINGUP.md](docs/BRINGUP.md)):
+
+- **Switch tables.** `jmp cs:[bx+table]` names its arms only in the table, so
+  they were never lifted as entry points and the jump dispatch-missed. Lifting
+  them cleared the -1022 (traced last round to a null page-descriptor field).
+- **`enter` is a prologue.** Jet reaches its ISAM entry points through tables
+  built at run time, so `enter N,0` is the only marker they have.
+- **Runtime:** `OpenFile` kept only the basename (breaking
+  `address\abook.mdb`); DOS delete and get-date/time; real stack purges for
+  WaveMix, waveOut and OLE2DISP; module handles above 32 (Win16 never returns
+  one below, and callers test for it); `GetModuleHandle`; a crash reporter
+  that names the fault and the guest call ring.
+- **Relift** against current pcrecomp (ADC/SBB carry-in, BCD, shift flags).
+
+18,386 -> 222k lifted calls before the host switch; ~277k after it.
 
 ### How it lifts (six modules → one program)
 
@@ -154,7 +166,7 @@ space and one static archive; the only unresolved symbols are standard libc.
 |--------|-------------|--------|
 | **UTOPIA.DLL** (engine)   | 1–24    | 22 code segs lifted (2,685 IDA funcs / 280,921 heads) |
 | **UEXTRA.DLL** (blitter)  | 25–27   | 2 code segs lifted |
-| **UTOPIAWA.EXE** (host)   | 31–40   | 9 code segs lifted (1,541 IDA funcs / 101,829 heads) |
+| **HOME.EXE** (host)       | 31–38   | 6 code segs lifted (was UTOPIAWA.EXE, 31–40, until the host switch) |
 | **MSAJT110.DLL** (Jet 1.1) | 41–146  | 104 code segs lifted |
 | **MSABC110.DLL** (Access Basic) | 147–219 | 73 code segs lifted |
 | **MSAES110.DLL** (Expression Service) | 220–227 | 7 code segs lifted |
@@ -229,7 +241,7 @@ same disc. Steps 2–4 write the generated files this repo does not track.
 #    Optional: the analysis/*_ida.json maps are committed (addresses only).
 py -3.11 tools/ida_export.py game/install/UTOPIA.DLL            analysis/utopia_ida.json
 py -3.11 tools/ida_export.py game/install/UEXTRA.DLL           analysis/uextra_ida.json
-py -3.11 tools/ida_export.py game/install/UTOPIAWA/UTOPIAWA.EXE analysis/utopiawa_ida.json
+py -3.11 tools/ida_export.py game/install/HOME/HOME.EXE         analysis/home_ida.json
 py -3.11 tools/ida_export.py game/install/MSAJT110.DLL          analysis/msajt110_ida.json
 py -3.11 tools/ida_export.py game/install/MSABC110.DLL          analysis/msabc110_ida.json
 py -3.11 tools/ida_export.py game/install/MSAES110.DLL          analysis/msaes110_ida.json
@@ -237,7 +249,8 @@ py -3.11 tools/ida_export.py game/install/MSAES110.DLL          analysis/msaes11
 py -3.11 tools/lift_combined.py
 # 3. Regenerate glue -> src/_unresolved_stubs.c, src/_dispatch.c, runtime stubs
 py -3.11 tools/gen_stubs.py && py -3.11 tools/gen_dispatch.py
-py -3.11 tools/gen_win16_stubs.py game/install/UTOPIA.DLL game/install/UEXTRA.DLL game/install/UTOPIAWA/UTOPIAWA.EXE \n    game/install/MSAJT110.DLL game/install/MSABC110.DLL game/install/MSAES110.DLL
+py -3.11 tools/gen_win16_stubs.py game/install/UTOPIA.DLL game/install/UEXTRA.DLL game/install/HOME/HOME.EXE \
+    game/install/MSAJT110.DLL game/install/MSABC110.DLL game/install/MSAES110.DLL
 py -3.11 tools/gen_segments_h.py
 # 4. Build the combined flat memory image
 py -3.11 tools/gen_image_bob.py
@@ -251,8 +264,8 @@ cmake -B build -G Ninja && cmake --build build
 
 1. ✅ Recon — module map, imports, clusters, actor format
 2. ✅ IDA code map + lift — **all six modules lift to link-clean C**
-3. 🟦 Bringup — engine init + host InitInstance run, Jet opens SYSTEM.MDB;
-   **blocked on Jet error -1022** (an uninitialised RMS object field)
+3. 🟦 Bringup — engine init, HOME host runs, Jet opens all its databases;
+   **blocked on a host longjmp** (`STATUS_BAD_STACK` in `jet_setjmp.c`)
 4. ⬜ First frame — render the Bob house room (WinG/DIB)
 5. ⬜ One actor on screen — load ROVER.ACT, draw a cel, play a voice clip
 6. ⬜ **LLM speech** — LLM + TTS drive the actor's existing animation/voice channel

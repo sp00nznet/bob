@@ -1203,3 +1203,97 @@ been filled when the file was attached to it.
 Note `seg077_0054` runs **once** in a whole run, so the ARGS dump is
 unambiguous; and it is a different object class from the 0x212-byte slots at
 0x16/0x228/0x43A, so do not assume the same layout.
+
+## The -1022 falls to switch tables, and the host turns out to be WordArt
+
+### Relift after on-disk damage
+
+The untracked lift outputs (`src/seg*.c`, objects) were damaged on disk -- one
+`seg025.c` held another project's CMakeCache. Everything generated was
+regenerated. Current pcrecomp's lift16 emits `flags_adc`/`flags_sbb`, the BCD
+adjusts, `recomp_div0` and `RECOMP_ENTER`/`RECOMP_TICK`, now ported into
+`runtime/cpu.h`. The run was unchanged (18,386 calls, -1022), so the adoption
+is neutral. `gen_win16_stubs.py` must be given all six modules or it drops 38
+imports that only the Jet DLLs use.
+
+Correction to the previous section: `4014` is a 3198-byte block, so
+`4014:427Eh` cannot be the object. The `[785Ah]` segment is some other
+selector; the watch on `4014:4280` saw nothing for that reason.
+
+### Switch arms
+
+`dispatch_near MISS seg=79 off=2866 in seg079_27B8` came right before the bad
+lseek. `seg079_27B8` is `jmp word cs:[bx+27CAh]`, a nine-entry switch, and
+**none** of the arms were lifted entry points: they land inside other basic
+blocks, so dispatch had nowhere to go. `ne_decode.detect_functions` now reads
+each `cs:`-relative jump/call table and makes every word that is an instruction
+head an entry (it stops at the first that is not; an extra entry only
+over-splits, which the basic-block model tolerates). With that alone the -1022
+is gone. **Suggestive, not shown:** that the skipped arm is the code that fills
+the descriptor's `+2` field.
+
+### `enter` prologues
+
+Next came `dispatch_far` misses into `seg072` (`1138`, `28D6`, `29F6`) and
+`seg071:2AA8`, through Jet's per-ISAM vtable at `ds:[bx+11C8h]`, which Jet
+fills at run time. Each target is `enter N,0` straight after `leave; retf N`.
+`detect_functions` knew `push bp; mov bp,sp` but not `enter`; it does now.
+The calls went from 28k to 222k, Jet completed the DAO login and opened
+`utopia.mdb` and the address book.
+
+`FORCE_PROMOTE` can now add a head IDA left as data (`seg9:5A74`, an exported
+`push ds; mov ax,18h; mov ds,ax` entry). Decoding is head-only, so **every**
+instruction start up to the next IDA head has to be listed. With only `5A74`,
+the `mov ax,18h` at `5A75` was silently dropped from the lift.
+
+### Runtime fixes
+
+- `of_dos_path` kept only the basename: `address\abook.mdb` became a
+  `C:\abook.mdb` that does not exist.
+- DOS `41h` (delete; refuses `.mdb`, since `bob_resolve` matches by suffix),
+  `2Ah`/`2Ch` (date/time).
+- Purges for WAVMIX16, waveOut*, OLE2DISP, WriteProfileString, GetClassInfo,
+  FindAtom, GlobalDosAlloc, SetMetaFileBits; each had run with a guessed 0.
+- **Module handles above 32.** UTOPIA's DGROUP selector is `0x18`, and Win16
+  callers test `LoadLibrary(...) <= 32` for failure. `ne_loadlib` answers
+  `0xE000|sel` and every hinst lookup folds it back (`ne_hinst_canon`).
+- `GetModuleHandle` implemented.
+- `main.c` installs an unhandled-exception filter that prints the fault code,
+  the last 24 guest calls and the registers. Before it, a fault ended the run
+  with a bare exit status of 127.
+
+### UTOPIAWA.EXE is not the host
+
+With handles fixed, the host showed a message box: *"Microsoft Bob WordArt
+1.0 -- You have to use WordArt from within another program."*
+`UTOPIAWA.REG` registers it as the WordArt OLE LocalServer. The "no main
+procedure" FatalAppExit this document chased for many rounds was WordArt
+correctly refusing to run standalone.
+
+Bob's house is `HOME\HOME.EXE`: MFC NE, entry `seg1:071C`, 6 code + 2 data
+segments, DGROUP seg 8, importing 85 UTOPIA ordinals. It now occupies the host
+slot (global 31..38; DGROUP 38). `main.c` enters it through
+`recomp_dispatch(CATZ_ENTRY_SEG, CATZ_ENTRY_IP)` rather than a hard-coded name.
+
+## Frontier: a host longjmp with no frame to land in
+
+HOME runs to about 277k lifted calls. It opens `system.mdb`, `utopia.mdb`,
+`address\abook.mdb` and `\upic.mdb`, and loads its TIPS resource. Then:
+
+```
+[jet] longjmp val=F9BF env=4592 from seg064_2164 seg064_2191 seg064_21A4 seg072_2CE6 ...
+[crash] host exception C0000028 at ...          (STATUS_BAD_STACK)
+```
+
+-1601 is Jet's "record not found", which it raises expecting a caller to catch.
+`jet_longjmp` found an anchor whose guest ss:sp matches, but the **C** frame
+that called `setjmp` into that anchor's `jmp_buf` has already returned. Its
+pruning only drops anchors whose guest sp is below the current one *on the
+same stack*. That misses a frame that returned while Jet was on its private
+stack, or one that returned before a deeper setjmp reused the same guest sp.
+The likely fix: invalidate anchors when the C function holding them returns,
+e.g. a scope guard in the `JET_SETJMP` macro, instead of inferring liveness
+from guest sp.
+
+The engine also still has `dispatch_far MISS seg=19 off=662C/6622` and
+`seg=20 off=00A3` during LibMain (unexamined).

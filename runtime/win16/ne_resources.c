@@ -2,6 +2,7 @@
  * tables so the Win16 shims can serve real LoadString/FindResource/LoadResource.
  * See ne_resources.h. Pure host-side parsing; no guest CPU/memory access here. */
 #include "ne_resources.h"
+#include "mem_layout.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -168,11 +169,11 @@ void ne_init(void) {
     if (g_inited) return;
     g_inited = 1;
     /* hinst == each module's DGROUP selector in the combined image (mem_layout):
-     * UTOPIA engine = 24, UEXTRA = 27, UTOPIAWA host = 40. The lifted code calls
+     * UTOPIA engine = 24, UEXTRA = 27, HOME host = its DGROUP. The lifted code calls
      * LoadString/LoadResource with these as the module handle. */
     register_mod("UTOPIA", 24);
     register_mod("UEXTRA", 27);
-    register_mod("UTOPIAWA", 40);
+    register_mod("HOME", CATZ_AUTO_DATA_SEG);
 }
 
 /* Win16 never hands out an instance handle below 32 -- callers test

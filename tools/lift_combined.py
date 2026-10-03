@@ -45,7 +45,9 @@ G = lambda *p: os.path.join(ROOT, 'game', 'install', *p)
 MODULES = [
     (G('UTOPIA.DLL'),            0,  'utopia_ida.json'),
     (G('UEXTRA.DLL'),            24, 'uextra_ida.json'),
-    (G('UTOPIAWA', 'UTOPIAWA.EXE'), 30, 'utopiawa_ida.json'),
+    # Host: HOME.EXE, Bob's house. UTOPIAWA.EXE (once here) is Bob's WordArt
+    # OLE server and refuses to run standalone.
+    (G('HOME', 'HOME.EXE'),     30, 'home_ida.json'),
     (G('MSAJT110.DLL'),          40, 'msajt110_ida.json'),
     # MSABC110 (Access Basic runtime, 73 code segs, NO DGROUP) -> global 147..219;
     # MSAES110 (Access Expression Service, 7 code + 1 DGROUP) -> global 220..227.
@@ -72,6 +74,10 @@ FORCE_PROMOTE = {
         0x06B9],       # reached only once the seg2/11/13 round above resolved
                            # -- each promoted method uncovers the next vtable behind it.
     8:  [0x1E1E],
+    9:  [0x5A74, 0x5A75],  # push ds | mov ax,18h | mov ds,ax -- an exported far
+                           # entry IDA left as data. Decoding is head-only, so
+                           # EVERY instruction up to the next IDA head must be
+                           # listed, or it is silently skipped.
     11: [0x13EF],
     13: [0x681A],
     # MSAJT110. Jet dispatches ISAM entry points through a table it builds at
@@ -327,8 +333,14 @@ def build_ida_map(src_name, offset, ne):
     # that wandered/crashed engine init. Grows as InitInstance reaches deeper.
     for gseg, offs in FORCE_PROMOTE.items():
         if str(gseg) in off:
-            extra.setdefault(str(gseg), set()).update(
-                o for o in offs if o in set(off[str(gseg)].get('heads', [])))
+            # The list is curated, so an entry IDA did not decode is still
+            # code: seg9:5A74's `push ds; mov ax,18h` prologue was data to IDA,
+            # with its code range starting at the `mov ds,ax` after it. Adding
+            # the head lets the decoder realign there two instructions later.
+            # Heads are not decoded between, so list each instruction start.
+            o_ = off[str(gseg)]
+            o_['heads'] = sorted(set(o_.get('heads', [])) | set(offs))
+            extra.setdefault(str(gseg), set()).update(offs)
     n = 0
     for gseg, offs in extra.items():
         funcs = set(off[gseg].get('functions', []))

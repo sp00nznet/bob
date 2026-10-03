@@ -33,7 +33,7 @@ MAX_SEL = 0x10000
 MODULES = [
     (G('UTOPIA.DLL'),               0),   # engine (base)
     (G('UEXTRA.DLL'),               24),  # blitter
-    (G('UTOPIAWA', 'UTOPIAWA.EXE'), 30),  # host
+    (G('HOME', 'HOME.EXE'),         30),  # host (Bob's house; 31..38)
     (G('MSAJT110.DLL'),             40),  # Jet 1.1 database engine (41..146)
     (G('MSABC110.DLL'),             146), # Access Basic runtime (147..219, no DGROUP)
     (G('MSAES110.DLL'),             219), # Access Expression Service (220..227)
@@ -191,11 +191,11 @@ def main():
            f'#define CATZ_IMAGE_SIZE {image_size}u',
            f'#define CATZ_GUARD_BASE {guard_base}u',
            f'#define CATZ_NUM_SEG {max_index}',
-           f'#define CATZ_ENTRY_SEG {entry_seg}      /* UTOPIAWA host startup (Borland C0 -> WinMain) */',
+           f'#define CATZ_ENTRY_SEG {entry_seg}      /* HOME host startup (C0 -> WinMain) */',
            f'#define CATZ_ENTRY_IP 0x{host.ip:04X}u',
            f'#define CATZ_STACK_SEG {stack_seg}',
            f'#define CATZ_STACK_SP 0x{host.sp:04X}u',
-           f'#define CATZ_AUTO_DATA_SEG {host_data}    /* UTOPIAWA DGROUP */',
+           f'#define CATZ_AUTO_DATA_SEG {host_data}    /* HOME DGROUP */',
            f'#define CATZ_DLL_ENTRY_SEG {engine.cs}      /* UTOPIA LibMain */',
            f'#define CATZ_DLL_ENTRY_IP 0x{engine.ip:04X}u',
            f'#define CATZ_DLL_AUTO_DATA_SEG {eng_data}  /* UTOPIA DGROUP */',

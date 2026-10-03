@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <io.h>       /* _chsize / _fileno: DOS "set file length" */
 
 #ifdef CATZ_TRACE_WIN16
@@ -320,6 +321,17 @@ void KERNEL_DOS3CALL(CPU *cpu) {
         for (; n < cpu->cx; n++)
             fputc(mem_read8(cpu, cpu->ds, (uint16_t)(cpu->dx + n)), f);
         cpu->ax = n;
+        break;
+    }
+    case 0x2A: case 0x2C: {                 /* get date / get time: never fail */
+        time_t now = time(NULL); struct tm *lt = localtime(&now);
+        if (ah == 0x2A) {                   /* AL=weekday, CX=year, DH=month, DL=day */
+            cpu->al = (uint8_t)lt->tm_wday; cpu->cx = (uint16_t)(lt->tm_year + 1900);
+            cpu->dh = (uint8_t)(lt->tm_mon + 1); cpu->dl = (uint8_t)lt->tm_mday;
+        } else {                            /* CH=hour, CL=min, DH=sec, DL=1/100 s */
+            cpu->ch = (uint8_t)lt->tm_hour; cpu->cl = (uint8_t)lt->tm_min;
+            cpu->dh = (uint8_t)lt->tm_sec;  cpu->dl = 0;
+        }
         break;
     }
     case 0x41: {                            /* delete: DS:DX=name */

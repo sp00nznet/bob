@@ -1,11 +1,11 @@
 /*
  * main.c - Microsoft Bob recomp runtime entry (bring-up host).
  *
- * Loads the combined flat image (UTOPIA engine + UEXTRA blitter + UTOPIAWA host,
+ * Loads the combined flat image (UTOPIA engine + UEXTRA blitter + HOME host,
  * with internal relocations applied), builds the selector->base table and the
  * initial CPU/segment state from the NE headers, then:
  *   1) runs the UTOPIA engine DLL entry (LibMain) with the engine DGROUP in DS,
- *   2) runs the UTOPIAWA host entry (Borland C0 -> WinMain), which drives the
+ *   2) runs the HOME host entry (C0 -> WinMain), which drives the
  *      engine through the cross-module calls the lifter resolved to direct C.
  *
  * This is the first execution attempt; it is expected to stop on the first
@@ -58,6 +58,31 @@ unsigned g_fn_ring_pos = 0;
 /* Global CPU pointer so the Win16 backend / WndProc bridge can invoke guest
  * code (the registered window procedure) on delivered messages, once wired. */
 CPU *g_cpu = NULL;
+
+#ifdef _WIN32
+#include <windows.h>
+/* A host fault (lifted code running off a bad pointer, a host stack overflow
+ * from runaway recursion) otherwise ends the process with a bare exit status
+ * -- 127 once, with nothing in the log. Say what it was and where the guest was. */
+static LONG WINAPI crash_filter(EXCEPTION_POINTERS *e)
+{
+    fprintf(stderr, "\n[crash] host exception %08lX at %p\n",
+            e->ExceptionRecord->ExceptionCode, e->ExceptionRecord->ExceptionAddress);
+    fprintf(stderr, "[crash] last calls (most recent last):");
+    for (int i = 24; i >= 1; i--) {
+        const char *nm = g_fn_ring[(g_fn_ring_pos - (unsigned)i) & (CATZ_FN_RING_SIZE - 1)];
+        if (nm) fprintf(stderr, " %s", nm);
+    }
+    if (g_cpu)
+        fprintf(stderr, "\n[crash] ax=%04X bx=%04X cx=%04X dx=%04X si=%04X di=%04X bp=%04X "
+                "sp=%04X ds=%04X es=%04X ss=%04X cs=%04X",
+                g_cpu->ax, g_cpu->bx, g_cpu->cx, g_cpu->dx, g_cpu->si, g_cpu->di,
+                g_cpu->bp, g_cpu->sp, g_cpu->ds, g_cpu->es, g_cpu->ss, g_cpu->cs);
+    fprintf(stderr, "\n[crash] total lifted calls: %u\n", g_fn_ring_pos);
+    fflush(stderr);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+#endif
 
 /* Dump the recent call ring as a histogram — the most frequent names are the
  * spin loop if we hang. Called from the assert path in cpu.h and the watchdog. */
@@ -193,6 +218,10 @@ int main(int argc, char *argv[])
 {
     const char *img = (argc > 1) ? argv[1] : CATZ_IMAGE_PATH;
 
+#ifdef _WIN32
+    { ULONG g = 64 * 1024; SetThreadStackGuarantee(&g); }   /* room to report a stack overflow */
+    SetUnhandledExceptionFilter(crash_filter);
+#endif
     CPU cpu;
     cpu_init(&cpu);
     g_cpu = &cpu;
@@ -218,7 +247,7 @@ int main(int argc, char *argv[])
     printf("  image: %s (%.2f MB)\n", img, CATZ_IMAGE_SIZE / 1048576.0);
     printf("  engine entry: seg%u:%04X (UTOPIA LibMain), engine-data seg%u\n",
            CATZ_DLL_ENTRY_SEG, CATZ_DLL_ENTRY_IP, CATZ_DLL_AUTO_DATA_SEG);
-    printf("  host entry:   seg%u:%04X (UTOPIAWA), host-data seg%u, stack seg%u\n",
+    printf("  host entry:   seg%u:%04X (HOME), host-data seg%u, stack seg%u\n",
            CATZ_ENTRY_SEG, CATZ_ENTRY_IP, CATZ_AUTO_DATA_SEG, CATZ_STACK_SEG);
     fflush(stdout);
 
@@ -255,15 +284,15 @@ int main(int argc, char *argv[])
            cpu.ax, g_fn_ring_pos - calls0);
     fflush(stdout);
 
-    /* 2) Run the UTOPIAWA host startup (Borland C0 -> WinMain): window +
+    /* 2) Run the HOME host startup (C0 -> WinMain): window +
      *    message loop, driving the engine via resolved cross-module calls. */
     cpu.ds = cpu.es = CATZ_AUTO_DATA_SEG;
     cpu.ss = CATZ_STACK_SEG;
     cpu.sp = CATZ_STACK_SP ? CATZ_STACK_SP : 0xFFFE;
     cpu.cs = CATZ_ENTRY_SEG;
     unsigned calls1 = g_fn_ring_pos;
-    seg035_0002(&cpu);                      /* UTOPIAWA entry (seg35:0x0002) */
-    printf("UTOPIAWA host returned (ax=%04X) after %u lifted calls\n",
+    recomp_dispatch(&cpu, CATZ_ENTRY_SEG, CATZ_ENTRY_IP);   /* HOME entry */
+    printf("HOME host returned (ax=%04X) after %u lifted calls\n",
            cpu.ax, g_fn_ring_pos - calls1);
     printf("total lifted calls: %u\n", g_fn_ring_pos);
 
