@@ -56,3 +56,7 @@ work/*.log
 src/seg*.c
 src/_dispatch.c
 src/_unresolved_stubs.c
+
+# Generated from the game or taken from it: made locally, never
+# committed (REPO_RULES section 3)
+runtime/segments.h
